@@ -164,7 +164,7 @@ python track_clip_seg.py --video ../sample/cam04_1019.mp4 --out ../sample/cam04_
 To get the trajectories as data rather than as a video:
 
 ```bash
-python export_tracks.py --fused ../sample/fused.csv --out ../out \
+python export_tracks.py --fused ../sample/fused.csv --clipdir ../sample --out ../out \
     --start 15:02:07 --date 2026-10-19 --lot-file ../calibration/lot_sanford_cedar.json
 ```
 
