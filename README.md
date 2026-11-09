@@ -7,10 +7,11 @@ identity across every view.
 Everything here runs on the minute of real footage in `sample/`, and the accuracy figures below were
 measured against a survey-grade GNSS track and a lidar, not estimated.
 
-![Three cameras, one map](figures/fused_frame.jpg)
+![Three camera views and the fused map, in motion](figures/demo.gif)
 
-*The camera views and the fused result, one frame. Orange = bus, blue = car, red = truck, yellow =
-pedestrian. A `*` after a label means two cameras were seeing that object in that frame.*
+*Thirteen seconds of it. Three camera views along the top, one map below — the same bus, the same
+pedestrian, one identity each, wherever they are. The whole minute is in
+[`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
 ## What comes out
 
@@ -62,6 +63,12 @@ queue at the lights.*
 4. **Project to the ground.** Each detection becomes a position in metres on that elevation surface.
 5. **Merge the views.** One object per road user, however many cameras can see it. Positions are
    combined by inverse-square range, so the nearest camera dominates.
+
+![Three cameras, one map](figures/fused_frame.jpg)
+
+*One frame, large enough to read. Orange = bus, blue = car, red = truck, yellow = pedestrian. A `*`
+after a label means two cameras were seeing that object at that moment — bus 64 is in cam03 and in
+cam04, and appears on the map once.*
 
 Nothing in step 2 tells the solver how high the pole is or where it stands. It works that out from
 the clicked points alone, and the answer it returns — 5.4 m, 6.5 m and 6.7 m above the ground it
