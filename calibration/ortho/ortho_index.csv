@@ -1,0 +1,2 @@
+no,site,file,year,lat,lon,width_px,height_px,merc_x_left,merc_y_top,merc_m_per_px,ground_m_per_px,ground_width_m,crs
+11,Sanford at Cedar junction,11_SanfordatCedarjunction_2025.png,2025,33.94755,-83.376504,2584,2584,-9281526.423,4021857.856,0.074646,0.061922,160.0,EPSG:3857

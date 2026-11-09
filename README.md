@@ -84,6 +84,39 @@ checking, because it is a real pole you can go and look at.
 Those are how far the clicked points land from where they should, measured on the ground. cam04 is
 the worst of the three and also the one with the fewest points; more points is the obvious fix.
 
+A median is one number and it hides everything, so the points are in the repository as pictures. The
+same point carries the same number and the same colour in the camera frame and on the aerial
+photograph — green within 10 cm, red beyond 50 — so you can follow any one of them across and judge
+it yourself:
+
+![cam02 control points](figures/control_points_cam02_1019.jpg)
+
+*cam02, 88 points: the ends of the crossing stripes, kerb corners, a drain, the corners of the
+brickwork. Almost all green. Its worst point is 78 cm out, and it is 37 m away, where one pixel of
+vertical click is already 29 cm of ground — so that is under three pixels of hand.*
+
+![cam04 control points](figures/control_points_cam04_1019.jpg)
+
+*cam04, 47 points, median 32 cm. It has half as many points as cam02 spread over a longer reach —
+out to 57 m against cam02's 40 m — so each one carries more. Its worst, point 34 at 1.53 m, is a
+different problem: at that range it is twelve pixels, far more than a hand can slip, so that pair is
+almost certainly matched to the wrong feature. A residual table cannot tell those two causes apart.
+A picture can.*
+
+![all three cameras' control points](figures/control_points_all.jpg)
+
+*All three together on the aerial. The points gather on paint, kerbs and drains, because those are
+the only things you can identify in a camera frame and in an aerial photograph with any confidence.
+Plain tarmac and grass have none — nothing to click — which is why the junction is pinned down far
+better than the ground away from it.*
+
+Regenerate these at any time:
+
+```bash
+cd pipeline
+python plot_control_points.py
+```
+
 ## 19-59 cm against a survey-grade GNSS track
 
 Measured at this intersection against three independent references, on separate recordings.
