@@ -1,0 +1,9 @@
+# Steps 2, 4 and 5 (calibration, projection, fusion, export, rendering) need only these.
+numpy>=1.24
+scipy>=1.10
+opencv-python>=4.8
+
+# Step 3 (detection and tracking) additionally needs:
+#   ultralytics>=8.3   - and a PyTorch build matching your CUDA version, which pip cannot
+#                        choose for you. Install torch from https://pytorch.org/get-started
+#                        first, then `pip install ultralytics`.

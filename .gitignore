@@ -1,0 +1,9 @@
+# pipeline output
+out/
+sample/fused_demo/
+*_fit_pnp/overlay*.png
+__pycache__/
+*.pyc
+
+# model weights download themselves on first use
+*.pt
