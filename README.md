@@ -220,6 +220,17 @@ fires on 7.1% of rows and brings the furthest point in from 646 m to 55 m. It is
 cure: `fused.csv` still contains the diverged centres, and the smoother itself is untouched because
 changing it means re-validating against all three references.
 
+**A few vehicles still start off the road, and that one is not fixed.** A handful of buses enter
+the picture already standing in the trees, then curve onto the carriageway over the next second or
+two. The guard above does not touch these, because it is not the centre that is wrong: the measured
+foot point is itself off the road. A bus 30 m away with its lower body behind a tree has a
+segmentation mask whose bottom edge is too high, and a ray through a point too high in the image
+lands too far away. The fused rows say as much, giving those frames a size consistency of about 0.5
+against 0.75 for the same bus once it is close and clear. Dropping low-consistency detections was
+tried and rejected: at a threshold that moves these starts appreciably it also cuts 3.3% of all
+vehicle rows and empties 50 tracks, most of them fine. The honest fix is in the foot point itself,
+under occlusion, and it has not been done.
+
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this
 recording two cameras differ by 0.6 m to 1.2 m on the same pedestrian's feet. Only about one row in
