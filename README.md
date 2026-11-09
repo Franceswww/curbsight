@@ -13,7 +13,7 @@ measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole minute is in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 4,104 road users in 71 minutes
+## 3,677 road users in 71 minutes
 
 ![Vehicle paths over one minute](figures/1min_vehicles.jpg)
 
@@ -30,11 +30,11 @@ from the same afternoon. That recording is not in the repository, only its figur
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*362 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*356 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*1,986 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*1,948 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
@@ -208,28 +208,6 @@ the junction.
 the vehicle has actually moved a couple of metres. A car creeping into a bay keeps whatever heading
 it last had out on the aisle, which is why it is better not to draw it at all than to draw it
 pointing the wrong way.
-
-**A smoothed centre can lose its object.** Each road user carries two positions: the foot point,
-which is measured, and the centre, which a Kalman smoother in `fuse_tracks.py` estimates from it. A
-smoother that loses its object does not stop. On this recording one pedestrian's centre ends 676 m
-away while its own foot point never leaves a 60 m circle, and milder cases of the same thing put a
-car on the footway. So before drawing or exporting anything, a centre further from its own foot
-point than the object's own body is rejected and the foot point used instead. That is the same bound
-the geometric solve already enforces, applied once more to the fused result, and over 71 minutes it
-fires on 7.1% of rows and brings the furthest point in from 646 m to 55 m. It is a guard, not a
-cure: `fused.csv` still contains the diverged centres, and the smoother itself is untouched because
-changing it means re-validating against all three references.
-
-**A few vehicles still start off the road, and that one is not fixed.** A handful of buses enter
-the picture already standing in the trees, then curve onto the carriageway over the next second or
-two. The guard above does not touch these, because it is not the centre that is wrong: the measured
-foot point is itself off the road. A bus 30 m away with its lower body behind a tree has a
-segmentation mask whose bottom edge is too high, and a ray through a point too high in the image
-lands too far away. The fused rows say as much, giving those frames a size consistency of about 0.5
-against 0.75 for the same bus once it is close and clear. Dropping low-consistency detections was
-tried and rejected: at a threshold that moves these starts appreciably it also cuts 3.3% of all
-vehicle rows and empties 50 tracks, most of them fine. The honest fix is in the foot point itself,
-under occlusion, and it has not been done.
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this

@@ -70,6 +70,56 @@ def trim_parked(pts, stop_r, stop_s, fps):
     return (i, j) if j > i else None
 
 
+GATE = {"Pedestrian": 1.2, "Bicycle": 1.5, "Motorcycle": 1.5,
+        "Passenger Vehicle": 3.0, "Truck": 5.0, "Bus": 6.0}        # fuse_tracks.py's own linking gate
+
+
+def camera_points(clipdir, cams):
+    """every camera track's own ground point, per frame, for checking the fused average against"""
+    import render_demo as RD
+    out = {}
+    for cam in cams:
+        path = os.path.join(clipdir, cam, "trajectories.csv")
+        if not os.path.exists(path):
+            continue
+        with open(path, newline="", encoding="utf-8") as f:
+            rs = list(csv.DictReader(f))
+        g = RD.Cam(cam, cam + "_fit_pnp").ground([[float(r["foot_x"]), float(r["foot_y"])] for r in rs])
+        for r, p in zip(rs, g):
+            out[(cam, int(r["track_id"]), int(r["frame"]))] = p
+    return out
+
+
+def cameras_disagree(r, cls, cam_pts, mult):
+    """True when the cameras that made this fused row cannot have been looking at one object.
+
+    fuse_tracks.py merges camera tracks with union-find. Each single union is inside its gate, but
+    nothing checks the set that comes out: one object here is built from eight camera tracks and
+    spans 66 m, so its position is the average of two different vehicles and lands where neither
+    ever drove. Over 71 minutes half of all multi-camera rows have their cameras disagreeing by
+    more than 5 m.
+
+    There is no position to rescue in such a row. Taking the nearest camera's own measurement was
+    tried and is worse: the nearest camera changes, so the drawn path teleports between the two
+    vehicles and leaves a straight line across the scene. So the row is dropped, and the path is
+    drawn in pieces, with a break wherever rows are missing.
+    """
+    if not cam_pts or mult <= 0:
+        return False
+    srcs = [q for q in r.get("src", "").split("|") if ":" in q]
+    if len(srcs) < 2:
+        return False
+    pts = []
+    for q in srcs:
+        c, tid = q.rsplit(":", 1)
+        p = cam_pts.get((c, int(tid), int(r["frame"])))
+        if p is not None:
+            pts.append(p)
+    if len(pts) < 2:
+        return False
+    return max(math.dist(a, b) for i, a in enumerate(pts) for b in pts[i + 1:]) > mult * GATE.get(cls, 3.0)
+
+
 BODY = {"Pedestrian": (0.6, 0.5), "Passenger Vehicle": (4.5, 1.9), "Truck": (5.5, 2.1),
         "Bus": (10.5, 2.6), "Motorcycle": (2.0, 0.8), "Bicycle": (1.8, 0.6)}    # metres, length x width
 
@@ -121,6 +171,18 @@ def arrow_head(img, a, b, col, res=0.04):
                                       back - n * (HEAD_HALFW_M / res)], np.int32), col, cv2.LINE_AA)
 
 
+def pieces(os_, mpx, fps, gap_s=1.0):
+    """a path split wherever rows are missing, so a dropped stretch is a break and not a long line"""
+    out, run = [], []
+    for o in os_:
+        if run and o["t_sec"] - run[-1]["t_sec"] > gap_s:
+            out.append(run); run = []
+        run.append(o)
+    if run:
+        out.append(run)
+    return [[mpx(o["E"], o["N"]) for o in seg] for seg in out]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fused", required=True)
@@ -139,6 +201,12 @@ def main():
                     "not traffic at the junction and are dropped")
     ap.add_argument("--min-s", type=float, default=3.0, help="paths shorter than this are drawn grey")
     ap.add_argument("--no-trim", action="store_true")
+    ap.add_argument("--clipdir", default=None,
+                    help="the directory holding <camera>/trajectories.csv; needed for --max-disagree")
+    ap.add_argument("--cams", default="cam02_1019,cam03_1019,cam04_1019")
+    ap.add_argument("--max-disagree", type=float, default=2.0,
+                    help="drop a fused row whose cameras disagree by more than this many linking "
+                         "gates: they were not looking at one object. 0 disables")
     ap.add_argument("--centre-clamp", type=float, default=1.0,
                     help="reject a solved centre further than this many body-reaches from its own "
                          "foot point and use the foot point instead; 0 disables the check")
@@ -179,14 +247,23 @@ def main():
         hh, mm, ss = (float(v) for v in a.start.split(":"))
         t0 = hh * 3600 + mm * 60 + ss
 
-    out_rows, summary, cut, dropped, clamped = [], [], 0, 0, 0
+    cam_pts = camera_points(a.clipdir, a.cams.split(",")) if a.clipdir else {}
+    out_rows, summary, cut, dropped, clamped, split, emptied = [], [], 0, 0, 0, 0, 0
     for gid, rs in sorted(rows.items()):
         cls = rs[0]["cls"]
-        pts = []
+        pts, kept_rs = [], []
         for r in rs:
+            if cameras_disagree(r, cls, cam_pts, a.max_disagree):
+                split += 1
+                continue
             e, n, fell_back = centre_or_foot(r, cls, a.centre_clamp)
             pts.append((int(r["frame"]), e, n))
+            kept_rs.append(r)
             clamped += fell_back
+        if len(pts) < 2:
+            emptied += 1
+            continue
+        rs = kept_rs
         lo, hi = 0, len(rs) - 1
         if cls in VEHICLE and not a.no_trim:
             keep = trim_parked(pts, a.stop_r, a.stop_s, a.fps)
@@ -264,20 +341,24 @@ def main():
         for gid, os_ in sorted(by_gid.items()):
             if (os_[0]["cls"] in VEHICLE) != want:
                 continue
-            p = [mpx(o["E"], o["N"]) for o in os_]
+            segs = pieces(os_, mpx, a.fps)
+            p = [q for seg in segs for q in seg]
             dur = os_[-1]["t_sec"] - os_[0]["t_sec"]
             if dur < a.min_s:
-                cv2.polylines(img, [np.array(p, np.int32)], False, (150, 150, 150), 1, cv2.LINE_AA)
+                for seg in segs:
+                    cv2.polylines(img, [np.array(seg, np.int32)], False, (150, 150, 150), 1, cv2.LINE_AA)
                 continue
             col = PALETTE[gid % len(PALETTE)]
-            cv2.polylines(img, [np.array(p, np.int32)], False, col, 3, cv2.LINE_AA)
+            for seg in segs:
+                cv2.polylines(img, [np.array(seg, np.int32)], False, col, 3, cv2.LINE_AA)
             cv2.circle(img, p[0], 7, col, -1)                      # start
             cv2.circle(img, p[0], 7, (255, 255, 255), 1, cv2.LINE_AA)
-            if len(p) > 2:                                         # which way it was going, at the end
-                k = len(p) - 1
-                while k > 0 and math.dist(p[k], p[-1]) < 3.0 / RES:
+            last = segs[-1]                                        # the arrow belongs to the last piece
+            if len(last) > 2:
+                k = len(last) - 1
+                while k > 0 and math.dist(last[k], last[-1]) < 3.0 / RES:
                     k -= 1
-                arrow_head(img, p[k], p[-1], col, RES)
+                arrow_head(img, last[k], last[-1], col, RES)
             drawn += 1
         label = "%s: %d paths >= %.0f s" % (tag, drawn, a.min_s)
         cv2.putText(img, label, (24, 46), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 0), 5, cv2.LINE_AA)
@@ -286,8 +367,9 @@ def main():
         print("%s: %d paths drawn" % (tag, drawn))
 
     print("%d objects, %d rows written; %d rows cut as standing, %d vehicles dropped as never "
-          "moving; %d diverged centres replaced by their foot point"
-          % (len(summary), len(out_rows), cut, dropped, clamped))
+          "moving; %d diverged centres replaced by their foot point; %d rows dropped and %d objects "
+          "lost entirely because the cameras disagreed"
+          % (len(summary), len(out_rows), cut, dropped, clamped, split, emptied))
 
 
 if __name__ == "__main__":
