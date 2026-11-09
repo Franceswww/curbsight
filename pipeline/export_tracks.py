@@ -70,6 +70,36 @@ def trim_parked(pts, stop_r, stop_s, fps):
     return (i, j) if j > i else None
 
 
+BODY = {"Pedestrian": (0.6, 0.5), "Passenger Vehicle": (4.5, 1.9), "Truck": (5.5, 2.1),
+        "Bus": (10.5, 2.6), "Motorcycle": (2.0, 0.8), "Bicycle": (1.8, 0.6)}    # metres, length x width
+
+
+def reach(cls):
+    """how far an object's centre can possibly sit from its own foot point: half its body diagonal,
+    plus 30 cm for where the foot point actually lands. The same bound centre_from_box already
+    enforces inside its own solve (render_demo.py), applied once more to the fused result."""
+    L, W = BODY.get(cls, (4.5, 1.9))
+    return 0.5 * math.hypot(L, W) + 0.3
+
+
+def centre_or_foot(r, cls, clamp):
+    """the solved centre, unless it has wandered further from its measurement than a body allows.
+
+    fuse_tracks.py runs a Kalman smoother on the centre, and a smoother that loses its object does
+    not stop: on this recording one pedestrian's centre ends up 676 m away while its own foot point
+    never leaves a 60 m circle. Those are the trajectories that fly off across the roofs, and the
+    milder ones are what put a car on the footway. The foot point is the measured quantity and it
+    never does this, so when the two disagree by more than a body, the measurement wins.
+    """
+    e, n = float(r["E"]), float(r["N"])
+    if not r.get("Ec"):
+        return e, n, False
+    ec, nc = float(r["Ec"]), float(r["Nc"])
+    if clamp > 0 and math.hypot(ec - e, nc - n) > clamp * reach(cls):
+        return e, n, True
+    return ec, nc, False
+
+
 HEAD_M, HEAD_HALFW_M = 0.8, 0.26                                  # arrow head, metres on the ground
 
 
@@ -109,6 +139,9 @@ def main():
                     "not traffic at the junction and are dropped")
     ap.add_argument("--min-s", type=float, default=3.0, help="paths shorter than this are drawn grey")
     ap.add_argument("--no-trim", action="store_true")
+    ap.add_argument("--centre-clamp", type=float, default=1.0,
+                    help="reject a solved centre further than this many body-reaches from its own "
+                         "foot point and use the foot point instead; 0 disables the check")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -146,10 +179,14 @@ def main():
         hh, mm, ss = (float(v) for v in a.start.split(":"))
         t0 = hh * 3600 + mm * 60 + ss
 
-    out_rows, summary, cut, dropped = [], [], 0, 0
+    out_rows, summary, cut, dropped, clamped = [], [], 0, 0, 0
     for gid, rs in sorted(rows.items()):
         cls = rs[0]["cls"]
-        pts = [(int(r["frame"]), float(r["Ec"] or r["E"]), float(r["Nc"] or r["N"])) for r in rs]
+        pts = []
+        for r in rs:
+            e, n, fell_back = centre_or_foot(r, cls, a.centre_clamp)
+            pts.append((int(r["frame"]), e, n))
+            clamped += fell_back
         lo, hi = 0, len(rs) - 1
         if cls in VEHICLE and not a.no_trim:
             keep = trim_parked(pts, a.stop_r, a.stop_s, a.fps)
@@ -248,8 +285,9 @@ def main():
         cv2.imwrite(os.path.join(a.out, "trajectories_%s.png" % tag), img)
         print("%s: %d paths drawn" % (tag, drawn))
 
-    print("%d objects, %d rows written; %d rows cut as standing, %d vehicles dropped as never moving"
-          % (len(summary), len(out_rows), cut, dropped))
+    print("%d objects, %d rows written; %d rows cut as standing, %d vehicles dropped as never "
+          "moving; %d diverged centres replaced by their foot point"
+          % (len(summary), len(out_rows), cut, dropped, clamped))
 
 
 if __name__ == "__main__":

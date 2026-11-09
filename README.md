@@ -9,11 +9,11 @@ measured against a survey-grade GNSS track and a lidar, not estimated.
 
 ![Three camera views and the fused map, in motion](figures/demo.gif)
 
-*Thirteen seconds of it. Three camera views along the top, one map below — the same bus, the same
+*Thirteen seconds of it. Three camera views along the top, one map below. The same bus, the same
 pedestrian, one identity each, wherever they are. The whole minute is in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 4,063 road users in 71 minutes
+## 4,104 road users in 71 minutes
 
 ![Vehicle paths over one minute](figures/1min_vehicles.jpg)
 
@@ -26,11 +26,11 @@ starts, arrow = where it ends. Shorter paths are drawn thin and grey.*
 three in the afternoon.*
 
 Over a longer recording the shape of the place appears. These are the same scripts on 71 minutes
-from the same afternoon — that recording is not in the repository, only its figures:
+from the same afternoon. That recording is not in the repository, only its figures:
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*358 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*362 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
@@ -40,7 +40,7 @@ from the same afternoon — that recording is not in the repository, only its fi
 
 *So here is the same data as presence instead:
 how long each half-metre of ground was occupied. The footways, both crossings and the waiting areas
-at the corners come out — and so do the benches: the brightest half-metre in the picture collected
+at the corners come out, and so do the benches: the brightest half-metre in the picture collected
 45 minutes of the 71, because somebody sat there.*
 
 ![Vehicle presence](figures/71min_density_vehicles.jpg)
@@ -55,7 +55,7 @@ queue at the lights.*
    (33.94760&deg;N, 83.37630&deg;W).
 2. **Calibrate each camera.** Click matching points on a camera frame and on the aerial photograph,
    then solve that camera's position, orientation, focal length and lens distortion by minimising
-   the error **on the ground, in metres** — not in pixels. The ground is not assumed flat: a pixel's
+   the error **on the ground, in metres**, not in pixels. The ground is not assumed flat: a pixel's
    ray is cast onto a real elevation surface built from airborne lidar.
 3. **Detect and track in each view.** YOLO26x-seg plus BoT-SORT, every second frame. The foot point
    comes from the segmentation mask, not from the bounding box, because the mask's lowest edge is
@@ -67,12 +67,12 @@ queue at the lights.*
 ![Three cameras, one map](figures/fused_frame.jpg)
 
 *One frame, large enough to read. Orange = bus, blue = car, red = truck, yellow = pedestrian. A `*`
-after a label means two cameras were seeing that object at that moment — bus 64 is in cam03 and in
+after a label means two cameras were seeing that object at that moment. Bus 64 is in cam03 and in
 cam04, and appears on the map once.*
 
 Nothing in step 2 tells the solver how high the pole is or where it stands. It works that out from
-the clicked points alone, and the answer it returns — 5.4 m, 6.5 m and 6.7 m above the ground it
-solved them on, all three within 1.6 m of each other horizontally — is the first thing worth
+the clicked points alone, and the answer it returns, 5.4 m, 6.5 m and 6.7 m above the ground it
+solved them on, all three within 1.6 m of each other horizontally, is the first thing worth
 checking, because it is a real pole you can go and look at.
 
 | camera | points clicked | median residual | 90th percentile |
@@ -86,19 +86,19 @@ the worst of the three and also the one with the fewest points; more points is t
 
 A median is one number and it hides everything, so the points are in the repository as pictures. The
 same point carries the same number and the same colour in the camera frame and on the aerial
-photograph — green within 10 cm, red beyond 50 — so you can follow any one of them across and judge
+photograph, green within 10 cm and red beyond 50, so you can follow any one of them across and judge
 it yourself:
 
 ![cam02 control points](figures/control_points_cam02_1019.jpg)
 
 *cam02, 88 points: the ends of the crossing stripes, kerb corners, a drain, the corners of the
 brickwork. Almost all green. Its worst point is 78 cm out, and it is 37 m away, where one pixel of
-vertical click is already 29 cm of ground — so that is under three pixels of hand.*
+vertical click is already 29 cm of ground, so that is under three pixels of hand.*
 
 ![cam04 control points](figures/control_points_cam04_1019.jpg)
 
-*cam04, 47 points, median 32 cm. It has half as many points as cam02 spread over a longer reach —
-out to 57 m against cam02's 40 m — so each one carries more. Its worst, point 34 at 1.53 m, is a
+*cam04, 47 points, median 32 cm. It has half as many points as cam02 spread over a longer reach,
+out to 57 m against cam02's 40 m, so each one carries more. Its worst, point 34 at 1.53 m, is a
 different problem: at that range it is twelve pixels, far more than a hand can slip, so that pair is
 almost certainly matched to the wrong feature. A residual table cannot tell those two causes apart.
 A picture can.*
@@ -107,7 +107,7 @@ A picture can.*
 
 *All three together on the aerial. The points gather on paint, kerbs and drains, because those are
 the only things you can identify in a camera frame and in an aerial photograph with any confidence.
-Plain tarmac and grass have none — nothing to click — which is why the junction is pinned down far
+Plain tarmac and grass have none, nothing to click, which is why the junction is pinned down far
 better than the ground away from it.*
 
 Regenerate these at any time:
@@ -141,7 +141,7 @@ pip install -r requirements.txt
 ```
 
 Steps 2, 4 and 5 need nothing beyond numpy, scipy and OpenCV. Step 3 also needs `ultralytics` and a
-PyTorch build matching your CUDA version — see the note in `requirements.txt`.
+PyTorch build matching your CUDA version. See the note in `requirements.txt`.
 
 The sample already contains the output of step 3, so the fusion and the rendering run on their own:
 
@@ -152,8 +152,8 @@ python render_fused.py --clipdir ../sample --cams cam02_1019,cam03_1019,cam04_10
     --start 15:02:07 --date 2026-10-19 --lot-file ../calibration/lot_sanford_cedar.json
 ```
 
-To redo the detection and tracking as well — a few minutes per view on a GPU, considerably longer on
-a CPU — run step 3 first. The weights download themselves on first use:
+To redo the detection and tracking as well, which takes a few minutes per view on a GPU and considerably
+longer on a CPU, run step 3 first. The weights download themselves on first use:
 
 ```bash
 python track_clip_seg.py --video ../sample/cam02_1019.mp4 --out ../sample/cam02_1019
@@ -168,8 +168,8 @@ python export_tracks.py --fused ../sample/fused.csv --out ../out \
     --start 15:02:07 --date 2026-10-19 --lot-file ../calibration/lot_sanford_cedar.json
 ```
 
-which writes one row per object per frame — wall-clock time, latitude and longitude, and
-aerial-image pixel beside the metres — plus a line per trajectory in `tracks_summary.csv` giving its
+which writes one row per object per frame, with wall-clock time, latitude and longitude, and
+aerial-image pixel beside the metres, plus a line per trajectory in `tracks_summary.csv` giving its
 duration, path length, mean and top speed, and both endpoints, and the two trajectory figures.
 
 Over a long recording the lines overlap into a tangle, and presence reads better than paths:
@@ -188,7 +188,7 @@ python density.py --tracks ../out/tracks.csv --out ../out/density_vehicles.png -
 | `sample/` | one minute, three cameras, 2026-10-19 15:02:07, with step 3 already done |
 | `figures/` | the pictures above, and the sample minute as video |
 
-A camera's solved model lives in `calibration/<camera>_fit_pnp/cam.json` — `_fit_pnp` is the default
+A camera's solved model lives in `calibration/<camera>_fit_pnp/cam.json`. `_fit_pnp` is the default
 value of `--fit-suffix`, so several solutions for one camera can sit side by side and be chosen on
 the command line.
 
@@ -206,13 +206,24 @@ the junction.
 
 **A standing vehicle has no direction.** Heading is read from the track, so it means nothing until
 the vehicle has actually moved a couple of metres. A car creeping into a bay keeps whatever heading
-it last had out on the aisle — which is why it is better not to draw it at all than to draw it
+it last had out on the aisle, which is why it is better not to draw it at all than to draw it
 pointing the wrong way.
+
+**A smoothed centre can lose its object.** Each road user carries two positions: the foot point,
+which is measured, and the centre, which a Kalman smoother in `fuse_tracks.py` estimates from it. A
+smoother that loses its object does not stop. On this recording one pedestrian's centre ends 676 m
+away while its own foot point never leaves a 60 m circle, and milder cases of the same thing put a
+car on the footway. So before drawing or exporting anything, a centre further from its own foot
+point than the object's own body is rejected and the foot point used instead. That is the same bound
+the geometric solve already enforces, applied once more to the fused result, and over 71 minutes it
+fires on 7.1% of rows and brings the furthest point in from 646 m to 55 m. It is a guard, not a
+cure: `fused.csv` still contains the diverged centres, and the smoother itself is untouched because
+changing it means re-validating against all three references.
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this
 recording two cameras differ by 0.6 m to 1.2 m on the same pedestrian's feet. Only about one row in
-ten has two cameras at all, so single-camera accuracy is what mostly matters — but the difference
+ten has two cameras at all, so single-camera accuracy is what mostly matters, but the difference
 does show as a small step when an object hands over from one camera to the next.
 
 **The base map is a photograph of one particular morning.** The vehicles parked in it are from that
