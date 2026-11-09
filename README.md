@@ -13,7 +13,7 @@ measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole minute is in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## What comes out
+## 4,063 road users in 71 minutes
 
 ![Vehicle paths over one minute](figures/1min_vehicles.jpg)
 
@@ -48,7 +48,7 @@ at the corners come out — and so do the benches: the brightest half-metre in t
 *The same for vehicles. The bright patches are where traffic waits: the stop line, the bus stop, the
 queue at the lights.*
 
-## The five steps
+## Five steps from pixel to metre
 
 1. **A base map.** A county aerial photograph at 6 cm per pixel, carrying real coordinates,
    resampled onto a 4 cm grid in east/north metres from a fixed origin
@@ -84,7 +84,7 @@ checking, because it is a real pole you can go and look at.
 Those are how far the clicked points land from where they should, measured on the ground. cam04 is
 the worst of the three and also the one with the fewest points; more points is the obvious fix.
 
-## Accuracy
+## 19-59 cm against a survey-grade GNSS track
 
 Measured at this intersection against three independent references, on separate recordings.
 
@@ -146,7 +146,7 @@ python density.py --tracks ../out/tracks.csv --out ../out/density_pedestrians.pn
 python density.py --tracks ../out/tracks.csv --out ../out/density_vehicles.png --vehicles
 ```
 
-## What is in here
+## Four folders
 
 | | |
 |---|---|
@@ -159,7 +159,7 @@ A camera's solved model lives in `calibration/<camera>_fit_pnp/cam.json` — `_f
 value of `--fit-suffix`, so several solutions for one camera can sit side by side and be chosen on
 the command line.
 
-## Things worth knowing
+## Known limits
 
 **The "pedestrian" figure includes cyclists.** The code splits road users in two: cars, motorcycles,
 buses and lorries on one figure, everything else on the other. A cyclist is detected as a bicycle and
