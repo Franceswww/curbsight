@@ -80,7 +80,7 @@ def main():
             # no tighter than the body can; frames outside those stretches are not drawn in any view
             P_ = np.array([[float(r["Ec"]), float(r["Nc"])] for r in rs])
             T_ = np.array([int(r["frame"]) for r in rs]) / fps
-            runs = ET.vehicle_runs(T_, P_, cls_, field)
+            runs, P_ = ET.vehicle_runs(T_, P_, cls_, field)                   # standing stretches held at one position
             keep_ = set(int(i) for run in runs for i in run)
             clamped += len(rs) - len(keep_)
             pos = [(float(P_[i][0]), float(P_[i][1]), False) if i in keep_ else None for i in range(len(rs))]
@@ -197,18 +197,25 @@ def main():
         return bool(parked[g] or (p is not None and zone(*p) != "aisle"))
 
     def heading(g, fr):
-        # a direction is believed only once the track has moved 2.5 m over the window: a stopped car's
-        # box jitter is well under that, and used to turn the box sideways while it waited at the light
+        # fuse_tracks' smoothed heading first: it is the direction of the smoothed velocity while the
+        # vehicle moves, held while it stands, and back-filled to the first frame, so a bus waiting at
+        # its stop has a box from the moment it appears. (An earlier version withheld any heading until
+        # the track had moved 2.5 m, to stop a car crawling into a bay from spinning its box; that drew
+        # every standing bus as a dot while the camera view plainly showed a bus. Bays are hidden by the
+        # lot file and a standing vehicle is held at one position now, so the heading can be trusted.)
+        if (g, fr) in hdg_csv: return hdg_csv[(g, fr)]
         h = hist[g]; i = next(k for k, p in enumerate(h) if p[0] == fr)
         reach = 0.0
         for span in (4, 8, 16):
             p0, p1 = h[max(i - span, 0)], h[min(i + span, len(h) - 1)]
             reach = max(reach, float(np.hypot(p1[1] - p0[1], p1[2] - p0[2])))
-        # Below that distance no direction can be read from the track, and fuse_tracks' own smoothed
-        # heading is just as unfounded there - on a car crawling into a bay it swings through a full
-        # turn. Keep the last direction the car was actually seen driving in, or draw no direction.
-        if reach <= 2.5: return last_heading.get(g)
-        if (g, fr) in hdg_csv: return hdg_csv[(g, fr)]
+        if reach <= 2.5:
+            if g in last_heading: return last_heading[g]
+            # nothing from the track yet: a vehicle stands along its lane, so use the lane's direction
+            if field is not None:
+                c = field["cell"]; f_ = field["cells"].get((int(np.floor(h[i][1] / c)), int(np.floor(h[i][2] / c))))
+                if f_ is not None and f_[1] > 0.7: return f_[2]
+            return None
         for span in (4, 8, 16):
             p0, p1 = h[max(i - span, 0)], h[min(i + span, len(h) - 1)]
             de, dn = p1[1] - p0[1], p1[2] - p0[2]; d = np.hypot(de, dn)

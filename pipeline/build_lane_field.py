@@ -37,20 +37,25 @@ def build(tracks_csv, cell_m=2.0, min_step=0.3):
     for g, p in rows.items():
         p.sort()
         P = np.array([[e, nn] for _, e, nn in p])
+        # every row counts toward "how many vehicles were ever here": a bus standing at its stop is
+        # a vehicle on the road even while it is not moving. Counting moving steps only left the far
+        # bus stop at 1 vehicle in 71 minutes and the stop's buses were drawn as off-road.
+        for e, nn in P:
+            vehicles[(int(math.floor(e / cell_m)), int(math.floor(nn / cell_m)))].add(g)
+        # the direction, though, comes from moving steps only; a standing vehicle has none
         d = np.diff(P, axis=0)
         L = np.hypot(*d.T)
         for i in range(len(d)):
             if L[i] < min_step:
                 continue
             c = (int(math.floor(P[i][0] / cell_m)), int(math.floor(P[i][1] / cell_m)))
-            vehicles[c].add(g)
             th2 = 2 * math.atan2(d[i][1], d[i][0])            # doubled: both directions of a lane agree
             sx[c] += math.cos(th2); sy[c] += math.sin(th2); n[c] += 1
     cells = {}
     for c, vs in vehicles.items():
-        R = math.hypot(sx[c], sy[c]) / n[c]
+        R = math.hypot(sx[c], sy[c]) / n[c] if n[c] else 0.0
         cells["%d,%d" % c] = dict(vehicles=len(vs), steps=n[c], concentration=round(R, 3),
-                                  lane_deg=round(math.degrees(0.5 * math.atan2(sy[c], sx[c])), 1))
+                                  lane_deg=round(math.degrees(0.5 * math.atan2(sy[c], sx[c])), 1) if n[c] else 0.0)
     return dict(cell_m=cell_m, min_step_m=min_step, source=os.path.basename(tracks_csv),
                 vehicles=len(rows), cells=cells)
 

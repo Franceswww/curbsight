@@ -4,37 +4,37 @@ Roadside cameras to one map. Several cameras on one pole watch an intersection; 
 see into one set of trajectories on the ground, in metres, with each road user carrying a single
 identity across every view.
 
-Everything here runs on the minute of real footage in `sample/`, and the accuracy figures below were
-measured against a survey-grade GNSS track and a lidar, not estimated.
+Everything here runs on the two minutes of real footage in `sample/`, and the accuracy figures below
+were measured against a survey-grade GNSS track and a lidar, not estimated.
 
 ![Three camera views and the fused map, in motion](figures/demo.gif)
 
 *Thirteen seconds of it. Three camera views along the top, one map below. The same bus, the same
-pedestrian, one identity each, wherever they are. The whole minute is in
+pedestrian, one identity each, wherever they are. The whole two minutes are in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 2,960 road users in 71 minutes
+## 2,972 road users in 71 minutes
 
-![Vehicle paths over one minute](figures/1min_vehicles.jpg)
+![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
 
-*Every vehicle path in the sample minute that lasts at least 3 seconds. Dot = where the track
-starts, arrow = where it ends. Shorter paths are drawn thin and grey.*
+*Every vehicle path in the sample that lasts at least 3 seconds: 18 of them. Dot = where the track
+starts, arrow = where it ends.*
 
-![Pedestrian paths over one minute](figures/1min_pedestrians.jpg)
+![Pedestrian paths over two minutes](figures/2min_pedestrians.jpg)
 
-*The same minute, pedestrians. Fifty-nine road users in sixty seconds, on a university campus at
-three in the afternoon.*
+*The same two minutes, pedestrians: 60 paths. Ninety-two road users in a hundred and twenty seconds,
+on a university campus at three in the afternoon.*
 
 Over a longer recording the shape of the place appears. These are the same scripts on 71 minutes
 from the same afternoon. That recording is not in the repository, only its figures:
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*335 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*376 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*1,934 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*2,170 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
@@ -47,6 +47,40 @@ at the corners come out, and so do the benches: the brightest half-metre in the 
 
 *The same for vehicles. The bright patches are where traffic waits: the stop line, the bus stop, the
 queue at the lights.*
+
+## 52 near-misses in 71 minutes, at the bus stop and the south-east corner
+
+Two standard surrogate-safety measures are read off the same trajectories. **Time to collision**
+(TTC): at each frame, how long until a moving vehicle's body would reach another road user if both
+kept their current velocity. **Post-encroachment time** (PET): when two road users pass through the
+same square metre of ground, the time between the first leaving it and the second arriving. A
+near-miss is an encounter whose smallest value is at or under 1.5 s.
+
+![Near-misses by post-encroachment time](figures/71min_nearmiss_pet.jpg)
+
+*The 71 minutes, PET at or under 1.5 s: 52 near-misses, 20 between two vehicles, 23 between a
+vehicle and a pedestrian, 9 between a vehicle and a bicycle. The hottest ground is the south-east
+corner, where the crossing meets the stop line; the string along the north-west arm is the bus stop,
+vehicles passing a bus as it pulls out. Vehicles following one another in the same direction under
+1.5 s (30 of them) are headways, not conflicts, and are left off the map.*
+
+TTC at or under 1.5 s gives five near-misses in the same 71 minutes, three of them a car arriving
+behind a car waiting at the stop line on the east arm, one a car passing a bus pulling out of the
+north-west stop at 34 km/h.
+
+Not every small number is a near-miss. Positions carry about a metre of error, so an encounter is
+set aside when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the
+error, not a collision); when the closest moment falls on a row the merge filled through a gap
+rather than on a detection; when the other party is on course for the vehicle's measured edge but
+not for its body shrunk by the position error; when the two tracks are one road user seen twice;
+when the pedestrian is stepping on or off a bus; or when the vehicle is standing. Each row of
+`near_misses.csv` carries the reason, so every exclusion can be checked.
+
+On the two-minute sample the same thresholds give three near-misses, all between vehicles, each
+checked against the footage: a pickup passing a bus as it pulls out of the far stop (PET 0.13 s), a
+car pulling away from the stop line 0.27 s behind a bus crossing in front of it, and a left turn
+across the pickup's path (1.47 s). Five pedestrian encounters with that bus were set aside: the
+"pedestrians" were the faces printed on its advertisement.
 
 ## Five steps from pixel to metre
 
@@ -67,8 +101,8 @@ queue at the lights.*
 ![Three cameras, one map](figures/fused_frame.jpg)
 
 *One frame, large enough to read. Orange = bus, blue = car, red = truck, yellow = pedestrian. A `*`
-after a label means two cameras were seeing that object at that moment. Bus 64 is in cam03 and in
-cam04, and appears on the map once.*
+after a label means two cameras were seeing that object at that moment. Bus 118 is in cam03 and in
+cam04, bus 114 in cam02 and cam03, and each appears on the map once.*
 
 Nothing in step 2 tells the solver how high the pole is or where it stands. It works that out from
 the clicked points alone, and the answer it returns, 5.4 m, 6.5 m and 6.7 m above the ground it
@@ -188,14 +222,24 @@ python density.py --tracks ../out/tracks.csv --out ../out/density_pedestrians.pn
 python density.py --tracks ../out/tracks.csv --out ../out/density_vehicles.png --vehicles
 ```
 
+And the near-misses, from the same file:
+
+```bash
+python safety.py --tracks ../out/tracks.csv --out ../out/safety --start 15:02:07
+```
+
+which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the two parties,
+the time, the place and why it was or was not counted), `safety_summary.txt`, and the two heat maps.
+`--ttc` and `--pet` set the thresholds; both default to 1.5 s.
+
 ## Four folders
 
 | | |
 |---|---|
-| `pipeline/` | the five steps, plus the export and the renderer |
+| `pipeline/` | the five steps, plus the export, the renderer, the presence maps and the near-miss analysis |
 | `calibration/` | the solved camera models, the clicked control points, the base map, the ground surface, the lane network |
-| `sample/` | one minute, three cameras, 2026-10-19 15:02:07, with step 3 already done |
-| `figures/` | the pictures above, and the sample minute as video |
+| `sample/` | two minutes, three cameras, 2026-10-19 15:02:07, with step 3 already done |
+| `figures/` | the pictures above, and the sample as video |
 
 A camera's solved model lives in `calibration/<camera>_fit_pnp/cam.json`. `_fit_pnp` is the default
 value of `--fit-suffix`, so several solutions for one camera can sit side by side and be chosen on
@@ -205,7 +249,7 @@ the command line.
 
 **The "pedestrian" figure includes cyclists.** The code splits road users in two: cars, motorcycles,
 buses and lorries on one figure, everything else on the other. A cyclist is detected as a bicycle and
-so lands with the pedestrians. Over the 71 minutes that is 118 bicycles among 3,525 pedestrians.
+so lands with the pedestrians. Over the 71 minutes that is 64 bicycles among 2,518 pedestrians.
 
 **Parking is not traffic.** A car standing in a bay is still detected every frame, and its solved
 centre drifts a metre or two as the cameras see more or less of it. Drawn, it looks like a vehicle
@@ -217,6 +261,13 @@ the junction.
 the vehicle has actually moved a couple of metres. A car creeping into a bay keeps whatever heading
 it last had out on the aisle, which is why it is better not to draw it at all than to draw it
 pointing the wrong way.
+
+**Two road users can end up as one.** The merge links detections that are close in space and time,
+and a chain of such links can run from one vehicle to the next: in the sample, a bus leaving by the
+south-east arm passes within three metres of a car waiting in the opposite lane, the two are linked,
+and the car's whole drive through the junction is then carried under the bus's identity and class
+(object 80). The pickup in front of that car and the bus behind it are detected in every frame; one
+of the three is drawn.
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this

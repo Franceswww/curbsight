@@ -12,17 +12,29 @@ Reads a fuse_tracks.py fused.csv (east/north metres in the aerial frame) and wri
     trajectories_vehicles.png, trajectories_pedestrians.png
                         every path drawn on the aerial photo
 
-Parked vehicles. A vehicle that drives in and stops in a bay keeps the heading it had in the aisle,
-because the heading is only believed after 2.5 m of travel, so the drawn rectangle sits across the
-painted bay. The approach itself is traffic at the junction and is kept; the standing part is not
-wanted. So a vehicle's LEADING and TRAILING stationary run is cut (it stays within --stop-r of its
-first / last position for at least --stop-s): a car pulling out of a bay starts at the moment it
-moves, a car parking ends at the moment it stops. A stop in the MIDDLE of a journey - a red light, a
-queue, the bike box - is never cut. Pedestrians are never cut; standing at a kerb is real behaviour.
+What is drawn, and what is not. Every object is drawn from its smoothed centre, never from the raw
+foot point (the mask's bottom edge wobbles half a metre between frames and draws thorns).
+
+Vehicles pass two physical tests (vehicle_runs): the position must lie on the lane network learned
+from the traffic itself (--lane-field, built by build_lane_field.py: a 2 m cell fewer than three
+vehicles ever used is not road), and the path must turn no tighter than the body can (curvature_ok:
+over 90 degrees within 3 m, or 1.5 times the minimum-radius allowance within 8 m, is a loop or a
+hairpin). A standing vehicle is held at one position for the whole stop (hold_standing), so a car
+at the light is a point on its line and not a scribble, and is not cut. Vehicles inside the painted
+bays of --lot-file are not traffic and are not drawn; the aisle is a road.
+
+People and bicycles pass two (person_runs): no step faster than the body can move (4 m/s, 10 for a
+bicycle) and no position beyond what the cameras can see (55 m from the pole).
+
+What fails a test is left out and the path breaks there; stretches too short to mean anything are
+discarded (2 s and 5 m for a vehicle unless it is a stand, 1 s for a person). At the end two reports
+print: plausibility (what was drawn that should not have been) and retention (what was not drawn
+that might have been), because a rule that deletes a good track makes the first report look better.
 """
 import argparse
 import csv
 import glob
+from collections import defaultdict
 import json
 import math
 import os
@@ -77,21 +89,27 @@ def on_lane(field, p_prev, p, min_vehicles=3, min_conc=0.7, max_dev_deg=45.0):
     return dev <= math.radians(max_dev_deg)
 
 
-def curvature_ok(P, cls):
+def curvature_ok(P, cls, standing=None, step_m=1.0):
     """Per point: False where the path turns tighter than a body with this turning radius can.
 
     This is the loop and hairpin test. A standing bus whose solved centre swings around the box
     draws a circle three metres across; a vehicle leaving the frame half-visible hooks back on
-    itself; nothing on wheels does either. Headings come from steps of at least 0.3 m, because a
-    smaller step has no direction, and the rotation is measured over the last 3 m (over 90 degrees
-    is a hairpin for any class) and the last 8 m (more than 1.5 times what the minimum radius
-    allows). The whole stretch that turned is marked, not just its last point.
+    itself; nothing on wheels does either. Headings come from points step_m apart along the path,
+    and the rotation is measured over the last 3 m (over 90 degrees is a hairpin for any class)
+    and the last 8 m (more than 1.5 times what the minimum radius allows). The whole stretch that
+    turned is marked, not just its last point.
+
+    step_m is 1 m, not less: at 0.3 m the heading of a car creeping to the kerb is noise, and a
+    car pulling over, standing 33 s and pulling away lost 294 of its 340 rows to "turns" that were
+    nothing but that noise. A loop or a hairpin spans two or three metres and is seen just as well
+    at 1 m. Rows the caller has marked standing are never failed here: a held position has no
+    heading to judge.
     """
     n = len(P)
     ok = np.ones(n, bool)
     idx = [0]
     for i in range(1, n):
-        if np.hypot(*(P[i] - P[idx[-1]])) >= 0.3:
+        if np.hypot(*(P[i] - P[idx[-1]])) >= step_m:
             idx.append(i)
     if len(idx) < 3:
         return ok
@@ -111,18 +129,76 @@ def curvature_ok(P, cls):
             ok[idx[j3] + 1: idx[i + 1] + 1] = False
         elif abs(th[i] - th[j8]) > lim8:
             ok[idx[j8] + 1: idx[i + 1] + 1] = False
+    if standing is not None:
+        ok[standing] = True
     return ok
+
+
+def hold_standing(T, P, win_s=1.5, move_m=2.0, hold_m=1.0):
+    """A vehicle that is not going anywhere is drawn where it stands, once.
+
+    While a vehicle stands, its solved centre still wanders as the cameras see a little more or
+    less of it, and over a long stop that wander draws a circle or a scribble around a car that
+    never moved. Cutting those rows was the first answer and it emptied the map of every car
+    waiting at the light while the camera views still showed them. So the standing rows are kept
+    and given one position, the median of the stretch: a car at the light is a box that does not
+    twitch, and in the path figure a stop is a point on the line, not a knot.
+
+    Standing: the position moved less than move_m within the surrounding +-win_s. 2 m over 3 s is
+    0.67 m/s, slower than a vehicle drives but not slower than its solved centre wanders: on the
+    two-minute sample the centre of a vehicle going nowhere moved under 1.25 m in 90 % of 3 s
+    windows and under 1.96 m in 95 %. At 1 m the buses waiting at the far stop fell out of the
+    standing test, their wander then failed the curvature test, and they were not drawn for 10 to
+    20 s each while the cameras plainly showed them. At 2 m those stands are kept (57 % of vehicle
+    rows drawn instead of 54 %) with the same zero reversals.
+
+    A stand that creeps, a queue moving up a car length over twenty seconds, passes the standing
+    test row by row yet spans several metres as a whole; one median for all of it would make the
+    drawn position jump those metres in a single frame (5 m, 78 m/s, on the 71-minute export). So
+    a stand is held in steps: each held stretch spans at most hold_m, and the position moves on to
+    the next step's median, never further than hold_m at a time.
+    """
+    n = len(P)
+    held = P.copy()
+    if n < 3:
+        return held, np.zeros(n, bool)
+    standing = np.zeros(n, bool)
+    for i in range(n):
+        j0 = np.searchsorted(T, T[i] - win_s)
+        j1 = np.searchsorted(T, T[i] + win_s, side="right")
+        seg = P[j0:j1]
+        standing[i] = np.hypot(*(seg.max(0) - seg.min(0))) < move_m
+    i = 0
+    while i < n:
+        if not standing[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and standing[j + 1]:
+            j += 1
+        s = i
+        while s <= j:
+            e = s
+            while e + 1 <= j and np.hypot(*(P[s:e + 2].max(0) - P[s:e + 2].min(0))) <= hold_m:
+                e += 1
+            held[s:e + 1] = np.median(P[s:e + 1], axis=0)
+            s = e + 1
+        i = j + 1
+    return held, standing
 
 
 def vehicle_runs(T, P, cls, field, min_s=2.0, min_m=5.0):
     """The stretches of a vehicle path worth drawing: on the lane network, turning like a vehicle,
-    and each at least min_s long and min_m from end to end. Returns a list of index arrays."""
+    and each at least min_s long and either min_m from end to end or a stand of at least min_s
+    (a car waiting at the light goes nowhere and is still a car). Standing stretches are held at one
+    position first (hold_standing). Returns (list of index arrays, the positions to draw)."""
+    P, standing = hold_standing(T, P)
     keep = np.ones(len(P), bool)
     if field is not None and len(P) > 1:
         for i in range(1, len(P)):
             keep[i] = on_lane(field, P[i - 1], P[i])
         keep[0] = keep[1]
-    keep &= curvature_ok(P, cls)
+    keep &= curvature_ok(P, cls, standing)
     runs, i, n = [], 0, len(P)
     while i < n:
         if not keep[i]:
@@ -131,10 +207,10 @@ def vehicle_runs(T, P, cls, field, min_s=2.0, min_m=5.0):
         j = i
         while j + 1 < n and keep[j + 1]:
             j += 1
-        if T[j] - T[i] >= min_s and np.hypot(*(P[j] - P[i])) >= min_m:
+        if T[j] - T[i] >= min_s and (np.hypot(*(P[j] - P[i])) >= min_m or standing[i:j + 1].mean() > 0.5):
             runs.append(np.arange(i, j + 1))
         i = j + 1
-    return runs
+    return runs, P
 
 
 HEAD_M, HEAD_HALFW_M = 0.8, 0.26                                  # arrow head, metres on the ground
@@ -243,6 +319,36 @@ def plausibility(by_gid, fps, step_m=0.4):
     return len(bad)
 
 
+def retention(fused_rows, by_gid, fps):
+    """Say what was thrown away, not only what was kept.
+
+    The plausibility count above looks for bad geometry that IS drawn. It cannot see good data that
+    is NOT drawn: a rule that deleted 294 of a car's 340 rows, its entire 33 s stop included, made
+    the plausibility count better, and nobody noticed until the car was missing from the video. So
+    this reports, per class, how many of the fused rows reached the output, and names the vehicles
+    that lost the most of their time, so a rule that eats a good track shows up as a number.
+    """
+    # seconds come from frame spans, not row counts: the sample was processed at every second frame,
+    # the long recording at every frame, and a row count would halve one or double the other
+    span = lambda rs_: (max(int(r["frame"]) for r in rs_) - min(int(r["frame"]) for r in rs_) + 1) / fps if rs_ else 0.0
+    had = {g: len(rs) for g, rs in fused_rows.items()}
+    had_s = {g: span(rs) for g, rs in fused_rows.items()}
+    kept = {g: len(os_) for g, os_ in by_gid.items()}
+    kept_s = {g: span(os_) for g, os_ in by_gid.items()}
+    cls_of = {g: rs[0]["cls"] for g, rs in fused_rows.items()}
+    per = defaultdict(lambda: [0, 0])
+    for g, n in had.items():
+        k = "vehicles" if cls_of[g] in VEHICLE else cls_of[g]
+        per[k][0] += n
+        per[k][1] += kept.get(g, 0)
+    print("retention: " + "; ".join("%s %d%% of rows" % (k, round(100 * v[1] / v[0])) for k, v in sorted(per.items()) if v[0]))
+    lost = sorted((had_s[g] - kept_s.get(g, 0.0), g, cls_of[g], had_s[g], kept_s.get(g, 0.0))
+                  for g in had if cls_of[g] in VEHICLE and had_s[g] >= 5.0)
+    for lost_s, g, cls, h_s, k_s in sorted(lost, reverse=True)[:5]:
+        if lost_s >= 5:
+            print("   vehicle gid %-6d %-18s had %5.1f s, drawn %5.1f s, lost %5.1f s" % (g, cls, h_s, k_s, lost_s))
+
+
 def pieces(os_, mpx, fps, gap_s=1.0):
     """a path split wherever a processed frame is missing, so a cut stretch is a break and never a
     line drawn across it; every second frame was processed, so consecutive rows are two frames apart"""
@@ -324,7 +430,7 @@ def main():
                     continue
             frames = np.array([int(r["frame"]) for r in rs])
             P = np.array([[float(r["Ec"] or r["E"]), float(r["Nc"] or r["N"])] for r in rs])
-            runs = vehicle_runs(frames / a.fps, P, cls, field)
+            runs, P = vehicle_runs(frames / a.fps, P, cls, field)
             if not runs:
                 not_vehicle += 1
                 continue
@@ -419,6 +525,7 @@ def main():
         print("%s: %d paths drawn" % (tag, drawn))
 
     plausibility(by_gid, a.fps)
+    retention(rows, by_gid, a.fps)
     print("%d objects, %d rows written; %d vehicles hidden in the parking bays; %d vehicles and %d people "
           "with no stretch that moves like one; %d rows cut (off the lanes, inside a turn too tight, "
           "faster than a body can move, or beyond the cameras' reach)"

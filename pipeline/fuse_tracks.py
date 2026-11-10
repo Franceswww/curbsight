@@ -203,7 +203,7 @@ def main():
         for c, i, cls, e, n, dist, box, ec, *_ in det[fr]: tr[(c, i)].append((fr, e, n, cls, ec))
     # frame numbers are RAW frame indices (15/s, every 2nd processed); a 2026-10-28 bug divided them by the processed
     # rate, so every gap looked 2.2x longer than real and no handover over 2.3 s was ever bridged
-    FPS_RAW = 15.0; ends = []; starts = []
+    FPS_RAW = 15.0; ends = []; starts = []; maj_cls = {}
     for k, L in tr.items():
         L.sort()
         # exit/entry position, time and velocity come from the last/first NON-edge-cut detection: an edge-cut box's
@@ -218,11 +218,18 @@ def main():
         dt_h = max((head[-1][0] - head[0][0]) / FPS_RAW, 0.5)
         ve0, vn0 = ((head[-1][1] - head[0][1]) / dt_h, (head[-1][2] - head[0][2]) / dt_h) if len(head) > 1 else (0.0, 0.0)
         ends.append((f1, rel[-1][1], rel[-1][2], kind(L[-1][3]), (ve, vn), k)); starts.append((f0, rel[0][1], rel[0][2], kind(L[0][3]), (ve0, vn0), k))
+        maj_cls[k] = Counter(x[3] for x in L).most_common(1)[0][0]      # the track's own class, by majority of its detections
     all_f = sorted(det); stride = min((b - c for c, b in zip(all_f[:-1], all_f[1:])), default=2)   # raw frames between processed frames
     pairs = []
     for f1, e1, n1, k1, v1, ka in ends:
         for f0, e0, n0, k0, v0, kb in starts:
             if kb == ka or k0 != k1 or uf.find(ka) == uf.find(kb): continue
+            # A vehicle track is bridged only to a track of its own class. The bridge joins a track
+            # that ended to one that began where it would be, and a queue is exactly that: a lorry
+            # stops at the line, two seconds later a bus arrives in the same spot. Both are vehicles,
+            # so by kind they matched, and the lorry's 413 detections outvoted the bus's class. On
+            # the two-minute sample this is the one bridge of 81 whose classes differ.
+            if k0 == "veh" and maj_cls[ka] != maj_cls[kb]: continue
             dt = (f0 - f1) / FPS_RAW
             if not (0 <= (f0 - f1 - stride) / FPS_RAW <= GAP_S): continue        # the MISSING time is limited to GAP_S (a 5 s hole has 5 s + one stride between its two edge measurements); dt = 0: one camera's track ends in the frame the next camera's begins (a bus turning out of cam03 into cam02)
             # two kinematic hypotheses for where the lost track is now: constant velocity (the exit velocity carried on) and
@@ -528,6 +535,28 @@ def main():
           + ("" if not cut_list else ": " + ", ".join(f"obj {g} ({c}, {n} rows, at row {i}, {o} m)" for g, c, n, i, o in cut_list)))
     # written only now: the duplicate merge and the trajectory estimator above edit rows in place (a 2026-10-28
     # bug: the file used to be written before them, so none of it reached fused.csv)
+    # The class is voted again here, per FINAL object, from the detections that actually feed its rows.
+    # It was voted once above, before the occlusion bridge and the duplicate merge and before the
+    # trajectory estimator cuts an object apart. A bridge joined a school bus (Bus in 215 of 242
+    # detections) to the lorry queued behind it (Truck in 323), the merged vote came out Truck, the
+    # estimator then cut them apart again, and both halves kept the label Truck. A vote taken after
+    # the cuts, over each half's own detections, calls the bus a bus.
+    det_cls = {(c, i, fr): cls for fr, L_ in det.items() for c, i, cls, *_ in L_}
+    revote = defaultdict(Counter)
+    for r in rows:
+        for q in str(r.get("src", "")).split("|"):
+            if ":" in q:
+                c, i = q.rsplit(":", 1)
+                k = (c, int(i), int(r["frame"]))
+                if k in det_cls: revote[r["gid"]][det_cls[k]] += 1
+    relabelled = 0
+    for r in rows:
+        v = revote.get(r["gid"])
+        if v:
+            cls_new = v.most_common(1)[0][0]
+            if cls_new != r["cls"]: relabelled += 1
+            r["cls"] = cls_new
+    print(f"class re-voted per final object from its own detections: {relabelled} rows relabelled")
     out = os.path.join(a.clipdir, "fused.csv")
     with open(out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
