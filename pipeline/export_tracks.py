@@ -1,7 +1,7 @@
 """export_tracks.py - fused tracks out of the pipeline as map data and as a trajectory picture.
 
     python export_tracks.py --fused report_20261103/crossing2_fused.csv --out export/crossing2 \
-        [--start 15:02:18] [--date 2026-10-19] [--min-s 3]
+        [--start 15:02:18] [--date 2026-10-19] [--min-s 3] [--lot-file ...] [--lane-field ...]
 
 Reads a fuse_tracks.py fused.csv (east/north metres in the aerial frame) and writes
 
@@ -39,85 +39,101 @@ PALETTE = [(60, 76, 231), (74, 195, 139), (219, 152, 52), (182, 89, 155), (60, 1
            (18, 156, 243), (133, 160, 22), (80, 62, 44), (90, 33, 41), (125, 185, 222)]
 
 
-def max_move(pts, fps, win=2.0):
-    """Largest distance the object covers inside any `win`-second window.
+MIN_RADIUS = {"Passenger Vehicle": 4.5, "Truck": 6.0, "Bus": 9.0, "Motorcycle": 2.5}   # m, generous
 
-    A parked vehicle's solved centre drifts as the cameras see more or less of it - up to 2.5 m over
-    a minute here - so "it moved" cannot be read off the whole track. Over 2 s that drift stays small
-    while anything actually driving clears several metres.
+
+def load_lane_field(path):
+    """build_lane_field.py's output: per 2 m cell, how many vehicles used it and which way they went"""
+    j = json.load(open(path))
+    cells = {tuple(int(x) for x in k.split(",")): (v["vehicles"], v["concentration"], math.radians(v["lane_deg"]))
+             for k, v in j["cells"].items()}
+    return dict(cell=float(j["cell_m"]), cells=cells)
+
+
+def on_lane(field, p_prev, p, min_vehicles=3, min_conc=0.7, max_dev_deg=45.0):
+    """Is this vehicle position somewhere vehicles go, heading the way they go there?
+
+    A cell fewer than min_vehicles distinct vehicles ever drove through is not road: that is where
+    a runaway centre, a merged pair of cars averaged onto the plaza, or a car parked on the grass
+    ends up. Where the cell's traffic agrees on a direction (concentration above min_conc), a step
+    running across it is not a vehicle either. In the junction box traffic goes every way, the
+    concentration is low, and the direction test stays out of it, so turns are never touched.
     """
-    best, j = 0.0, 0
-    for i in range(len(pts)):
-        while (pts[i][0] - pts[j][0]) / fps > win:
-            j += 1
-        best = max(best, math.dist(pts[i][1:], pts[j][1:]))
-    return best
+    c = field["cell"]
+    i, j = math.floor(p[0] / c), math.floor(p[1] / c)
+    f = field["cells"].get((i, j))
+    # No borrowing from neighbouring cells. Borrowing was tried to keep the thin far end of the
+    # lanes, where a bus 50 m out crossed cells only one or two vehicles had used in 71 minutes, and
+    # it let the edge of a plaza one cell from the kerb count as road. A vehicle where no vehicle
+    # goes costs more than the last few metres of coverage, so the far end is the price.
+    if f is None or f[0] < min_vehicles:
+        return False
+    nveh, conc, lane = f
+    step = (p[0] - p_prev[0], p[1] - p_prev[1])
+    if math.hypot(*step) < 0.3 or conc < min_conc:
+        return True
+    dev = abs((math.atan2(step[1], step[0]) - lane + math.pi / 2) % math.pi - math.pi / 2)
+    return dev <= math.radians(max_dev_deg)
 
 
-def trim_parked(pts, stop_r, stop_s, fps):
-    """pts: [(frame, E, N), ...] in frame order -> (i, j) to keep, or None if nothing moves."""
-    n = len(pts)
-    i = 0
-    while i + 1 < n and math.dist(pts[i + 1][1:], pts[0][1:]) <= stop_r:
-        i += 1
-    if (pts[i][0] - pts[0][0]) / fps < stop_s:                     # the head is not a real stop
-        i = 0
-    j = n - 1
-    while j > 0 and math.dist(pts[j - 1][1:], pts[-1][1:]) <= stop_r:
-        j -= 1
-    if (pts[-1][0] - pts[j][0]) / fps < stop_s:
-        j = n - 1
-    return (i, j) if j > i else None
+def curvature_ok(P, cls):
+    """Per point: False where the path turns tighter than a body with this turning radius can.
+
+    This is the loop and hairpin test. A standing bus whose solved centre swings around the box
+    draws a circle three metres across; a vehicle leaving the frame half-visible hooks back on
+    itself; nothing on wheels does either. Headings come from steps of at least 0.3 m, because a
+    smaller step has no direction, and the rotation is measured over the last 3 m (over 90 degrees
+    is a hairpin for any class) and the last 8 m (more than 1.5 times what the minimum radius
+    allows). The whole stretch that turned is marked, not just its last point.
+    """
+    n = len(P)
+    ok = np.ones(n, bool)
+    idx = [0]
+    for i in range(1, n):
+        if np.hypot(*(P[i] - P[idx[-1]])) >= 0.3:
+            idx.append(i)
+    if len(idx) < 3:
+        return ok
+    Q = P[idx]
+    d = np.diff(Q, axis=0)
+    L = np.hypot(*d.T)
+    th = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
+    s = np.concatenate([[0.0], np.cumsum(L)])
+    lim3, lim8 = math.radians(90), 1.5 * (8.0 / MIN_RADIUS.get(cls, 4.5))
+    j3 = j8 = 0
+    for i in range(len(th)):
+        while s[i] - s[j3] > 3.0:
+            j3 += 1
+        while s[i] - s[j8] > 8.0:
+            j8 += 1
+        if abs(th[i] - th[j3]) > lim3:
+            ok[idx[j3] + 1: idx[i + 1] + 1] = False
+        elif abs(th[i] - th[j8]) > lim8:
+            ok[idx[j8] + 1: idx[i + 1] + 1] = False
+    return ok
 
 
-GATE = {"Pedestrian": 1.2, "Bicycle": 1.5, "Motorcycle": 1.5,
-        "Passenger Vehicle": 3.0, "Truck": 5.0, "Bus": 6.0}        # fuse_tracks.py's own linking gate
-
-
-def camera_points(clipdir, cams):
-    """every camera track's own ground point, per frame, for checking the fused average against"""
-    import render_demo as RD
-    out = {}
-    for cam in cams:
-        path = os.path.join(clipdir, cam, "trajectories.csv")
-        if not os.path.exists(path):
+def vehicle_runs(T, P, cls, field, min_s=2.0, min_m=5.0):
+    """The stretches of a vehicle path worth drawing: on the lane network, turning like a vehicle,
+    and each at least min_s long and min_m from end to end. Returns a list of index arrays."""
+    keep = np.ones(len(P), bool)
+    if field is not None and len(P) > 1:
+        for i in range(1, len(P)):
+            keep[i] = on_lane(field, P[i - 1], P[i])
+        keep[0] = keep[1]
+    keep &= curvature_ok(P, cls)
+    runs, i, n = [], 0, len(P)
+    while i < n:
+        if not keep[i]:
+            i += 1
             continue
-        with open(path, newline="", encoding="utf-8") as f:
-            rs = list(csv.DictReader(f))
-        g = RD.Cam(cam, cam + "_fit_pnp").ground([[float(r["foot_x"]), float(r["foot_y"])] for r in rs])
-        for r, p in zip(rs, g):
-            out[(cam, int(r["track_id"]), int(r["frame"]))] = p
-    return out
-
-
-def cameras_disagree(r, cls, cam_pts, mult):
-    """True when the cameras that made this fused row cannot have been looking at one object.
-
-    fuse_tracks.py merges camera tracks with union-find. Each single union is inside its gate, but
-    nothing checks the set that comes out: one object here is built from eight camera tracks and
-    spans 66 m, so its position is the average of two different vehicles and lands where neither
-    ever drove. Over 71 minutes half of all multi-camera rows have their cameras disagreeing by
-    more than 5 m.
-
-    There is no position to rescue in such a row. Taking the nearest camera's own measurement was
-    tried and is worse: the nearest camera changes, so the drawn path teleports between the two
-    vehicles and leaves a straight line across the scene. So the row is dropped, and the path is
-    drawn in pieces, with a break wherever rows are missing.
-    """
-    if not cam_pts or mult <= 0:
-        return False
-    srcs = [q for q in r.get("src", "").split("|") if ":" in q]
-    if len(srcs) < 2:
-        return False
-    pts = []
-    for q in srcs:
-        c, tid = q.rsplit(":", 1)
-        p = cam_pts.get((c, int(tid), int(r["frame"])))
-        if p is not None:
-            pts.append(p)
-    if len(pts) < 2:
-        return False
-    return max(math.dist(a, b) for i, a in enumerate(pts) for b in pts[i + 1:]) > mult * GATE.get(cls, 3.0)
+        j = i
+        while j + 1 < n and keep[j + 1]:
+            j += 1
+        if T[j] - T[i] >= min_s and np.hypot(*(P[j] - P[i])) >= min_m:
+            runs.append(np.arange(i, j + 1))
+        i = j + 1
+    return runs
 
 
 BODY = {"Pedestrian": (0.6, 0.5), "Passenger Vehicle": (4.5, 1.9), "Truck": (5.5, 2.1),
@@ -256,27 +272,15 @@ def main():
     ap.add_argument("--fps", type=float, default=15.0, help="frame rate the frame column counts in")
     ap.add_argument("--start", default=None, help="wall-clock time of frame 0, HH:MM:SS")
     ap.add_argument("--date", default=None)
-    ap.add_argument("--stop-r", type=float, default=1.5, help="m a parked vehicle may wander")
-    ap.add_argument("--stop-s", type=float, default=5.0, help="s before a standing vehicle is cut")
-    ap.add_argument("--min-move", type=float, default=5.0,
-                    help="m a vehicle must cover inside one 2 s window to count as driving")
-    ap.add_argument("--min-net", type=float, default=8.0,
-                    help="m between a vehicle's first and last kept position to count as going somewhere")
     ap.add_argument("--lot-file", default=None, help="a parking area drawn by hand (see "
-                    "lot_sanford_cedar.json): rows in its bays, or in the dead end behind them, are "
-                    "not traffic at the junction and are dropped")
+                    "calibration/lot_sanford_cedar.json): vehicles in its bays are not traffic")
+    ap.add_argument("--lane-field", default=os.path.join(OUTR, "lane_field_sanford_cedar.json"),
+                    help="build_lane_field.py output; vehicle positions off it are not drawn")
     ap.add_argument("--min-s", type=float, default=3.0, help="paths shorter than this are drawn grey")
-    ap.add_argument("--no-trim", action="store_true")
-    ap.add_argument("--clipdir", default=None,
-                    help="the directory holding <camera>/trajectories.csv; needed for --max-disagree")
-    ap.add_argument("--cams", default="cam02_1019,cam03_1019,cam04_1019")
-    ap.add_argument("--max-disagree", type=float, default=2.0,
-                    help="drop a fused row whose cameras disagree by more than this many linking "
-                         "gates: they were not looking at one object. 0 disables")
     ap.add_argument("--centre-clamp", type=float, default=3.0,
-                    help="a track with more than 5%% of its rows pushed beyond this many body-reaches "
-                         "from its own foot point is drawn from the smoothed foot point; on other "
-                         "tracks such rows are left out; 0 disables the check")
+                    help="pedestrians and bicycles: a track with more than 5%% of rows pushed beyond "
+                         "this many body-reaches from its own foot point is drawn from the smoothed "
+                         "foot point; 0 disables the check")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -314,48 +318,46 @@ def main():
         hh, mm, ss = (float(v) for v in a.start.split(":"))
         t0 = hh * 3600 + mm * 60 + ss
 
-    cam_pts = camera_points(a.clipdir, a.cams.split(",")) if a.clipdir else {}
-    out_rows, summary, cut, dropped, clamped, split, emptied, lost_runaway = [], [], 0, 0, 0, 0, 0, 0
+    field = load_lane_field(a.lane_field) if a.lane_field and os.path.exists(a.lane_field) else None
+    if field is None:
+        print("no lane field: vehicles are checked for curvature only (build one with build_lane_field.py)")
+    out_rows, summary, clamped, emptied, lot_hidden, not_vehicle, cut_rows = [], [], 0, 0, 0, 0, 0
     for gid, rs in sorted(rows.items()):
         cls = rs[0]["cls"]
-        kept_rs = [r for r in rs if not cameras_disagree(r, cls, cam_pts, a.max_disagree)]
-        split += len(rs) - len(kept_rs)
-        placed = centre_or_foot(kept_rs, cls, a.centre_clamp)
-        if kept_rs and all(p is None for p in placed):              # a vehicle the smoother lost
-            lost_runaway += 1
-            continue
-        pts, rs2 = [], []
-        for r, pos in zip(kept_rs, placed):
-            if pos is None:                                          # a runaway row on a sound track
-                clamped += 1
+        if cls in VEHICLE:
+            # A vehicle is drawn from its smoothed centre, and only where that centre behaves like a
+            # vehicle: on the lane network and turning no tighter than its body can. Everything the
+            # earlier row-by-row guards tried to catch (centres flying off, two cars averaged onto a
+            # plaza, parked cars wandering, loops at a bus stop) fails one of those two tests.
+            if lot is not None:                                   # bays and the dead end are not traffic
+                rs = [r for r in rs if zone(float(r["Ec"] or r["E"]), float(r["Nc"] or r["N"])) == "aisle"]
+                if len(rs) < 2:
+                    lot_hidden += 1
+                    continue
+            frames = np.array([int(r["frame"]) for r in rs])
+            P = np.array([[float(r["Ec"] or r["E"]), float(r["Nc"] or r["N"])] for r in rs])
+            runs = vehicle_runs(frames / a.fps, P, cls, field)
+            if not runs:
+                not_vehicle += 1
                 continue
-            e, n, fell_back = pos
-            pts.append((int(r["frame"]), e, n)); rs2.append(r)
-            clamped += fell_back
-        kept_rs = rs2
-        if len(pts) < 2:
-            emptied += 1
-            continue
-        rs = kept_rs
-        lo, hi = 0, len(rs) - 1
-        if cls in VEHICLE and not a.no_trim:
-            keep = trim_parked(pts, a.stop_r, a.stop_s, a.fps)
-            if keep is None:                                       # stands the whole time
-                cut += len(rs); dropped += 1
+            keep = np.concatenate(runs)
+            cut_rows += len(rs) - len(keep)
+            rs = [rs[i] for i in keep]
+            pts = [(int(frames[i]), float(P[i][0]), float(P[i][1])) for i in keep]
+        else:
+            placed = centre_or_foot(rs, cls, a.centre_clamp)
+            pts, rs2 = [], []
+            for r, pos in zip(rs, placed):
+                if pos is None:
+                    clamped += 1
+                    continue
+                e, n, fell_back = pos
+                pts.append((int(r["frame"]), e, n)); rs2.append(r)
+                clamped += fell_back
+            rs = rs2
+            if len(pts) < 2:
+                emptied += 1
                 continue
-            lo, hi = keep
-            kept = pts[lo:hi + 1]
-            # A standing car's solved centre drifts as the cameras see more or less of it: over
-            # twenty minutes that wanders tens of metres in total while the car goes nowhere, and
-            # a change of occlusion can jump it 4 m at once. So neither distance alone nor speed
-            # alone tells drift from a slow real manoeuvre. Traffic has to do one of the two:
-            # get somewhere, or at some point move at a driving pace.
-            if (math.dist(kept[0][1:], kept[-1][1:]) < a.min_net
-                    and max_move(kept, a.fps) < a.min_move):
-                cut += len(rs); dropped += 1
-                continue
-            cut += len(rs) - len(kept)
-        rs, pts = rs[lo:hi + 1], pts[lo:hi + 1]
 
         path = 0.0
         for k in range(len(pts) - 1):
@@ -366,14 +368,6 @@ def main():
             dt = (pts[k + 1][0] - pts[k][0]) / a.fps
             if dt > 0:
                 speeds.append(math.dist(pts[k][1:], pts[k + 1][1:]) / dt)
-        if cls in VEHICLE and lot is not None:                     # bays and the dead end are not traffic
-            keep_rows = [(r, p) for r, p in zip(rs, pts) if zone(p[1], p[2]) == "aisle"]
-            cut += len(rs) - len(keep_rows)
-            if len(keep_rows) < 2:
-                dropped += 1
-                continue
-            rs = [r for r, _ in keep_rows]
-            pts = [p for _, p in keep_rows]
         for r, (fr, e, n) in zip(rs, pts):
             t = fr / a.fps
             o = {"gid": gid, "cls": cls, "frame": fr, "t_sec": round(t, 3),
@@ -381,8 +375,8 @@ def main():
                  "lat": round(LAT0 + n / KY, 7), "lon": round(LON0 + e / KX, 7),
                  "hdg": r["hdg"], "n_cams": r["n_cams"], "filled": r["filled"]}
             if t0 is not None:
-                s = t0 + t
-                o["time"] = "%02d:%02d:%06.3f" % (int(s // 3600), int(s % 3600 // 60), s % 60)
+                s_ = t0 + t
+                o["time"] = "%02d:%02d:%06.3f" % (int(s_ // 3600), int(s_ % 3600 // 60), s_ % 60)
                 if a.date:
                     o["date"] = a.date
             out_rows.append(o)
@@ -440,11 +434,10 @@ def main():
         print("%s: %d paths drawn" % (tag, drawn))
 
     plausibility(by_gid, a.fps)
-    print("%d objects, %d rows written; %d rows cut as standing, %d vehicles dropped as never "
-          "moving; %d rows placed at or dropped for a runaway centre, %d vehicles not drawn because "
-          "their centre ran away; %d rows dropped and %d objects lost entirely because the cameras "
-          "disagreed"
-          % (len(summary), len(out_rows), cut, dropped, clamped, lost_runaway, split, emptied))
+    print("%d objects, %d rows written; vehicles: %d hidden in the parking bays, %d with no stretch "
+          "that moves like a vehicle on the lanes, %d rows cut off the lanes or inside a turn too tight; "
+          "pedestrians: %d rows placed at or dropped for a runaway centre, %d objects emptied"
+          % (len(summary), len(out_rows), lot_hidden, not_vehicle, cut_rows, clamped, emptied))
 
 
 if __name__ == "__main__":

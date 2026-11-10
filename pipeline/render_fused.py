@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--centre-clamp", type=float, default=3.0,
                     help="same as export_tracks.py: a track with over 5%% of rows pushed beyond this many "
                          "body-reaches is drawn from the smoothed foot point, other such rows are skipped")
+    ap.add_argument("--lane-field", default=os.path.join(RD.OUTR, "lane_field_sanford_cedar.json"),
+                    help="build_lane_field.py output; vehicle positions off the lane network are not drawn")
     ap.add_argument("--bay-dirs", action="store_true",
                     help="a vehicle that never drives takes its direction from the parked cars around it in the aerial")
     ap.add_argument("--lot-file", default=None, help="a parking area drawn by hand (see "
@@ -65,18 +67,29 @@ def main():
     by_gid = defaultdict(list)
     with open(os.path.join(a.clipdir, "fused.csv"), encoding="utf-8") as f:
         for r in csv.DictReader(f): by_gid[int(r["gid"])].append(r)
+    field = ET.load_lane_field(a.lane_field) if a.lane_field and os.path.exists(a.lane_field) else None
     for g, rs in by_gid.items():
         rs.sort(key=lambda r: int(r["frame"]))
         # Ec/Nc = vehicle centre (fuse_tracks.py pushes each camera's foot point before averaging); older
         # fused.csv files carry the foot point only and the push is done here at draw time
         centred = "Ec" in rs[0]
-        pos = ET.centre_or_foot(rs, rs[0]["cls"], a.centre_clamp) if centred else [(float(r["E"]), float(r["N"]), False) for r in rs]
-        if rs and all(p is None for p in pos):                            # a vehicle the smoother lost: not drawn at all
-            clamped += len(rs)
+        cls_ = rs[0]["cls"]
+        if centred and cls_ in ET.VEHICLE:
+            # the same two tests export_tracks.py applies to a vehicle: on the lane network, and turning
+            # no tighter than the body can; frames outside those stretches are not drawn in any view
+            P_ = np.array([[float(r["Ec"]), float(r["Nc"])] for r in rs])
+            T_ = np.array([int(r["frame"]) for r in rs]) / fps
+            runs = ET.vehicle_runs(T_, P_, cls_, field)
+            keep_ = set(int(i) for run in runs for i in run)
+            clamped += len(rs) - len(keep_)
+            pos = [(float(P_[i][0]), float(P_[i][1]), False) if i in keep_ else None for i in range(len(rs))]
+        else:
+            pos = ET.centre_or_foot(rs, cls_, a.centre_clamp) if centred else [(float(r["E"]), float(r["N"]), False) for r in rs]
+        if rs and all(p is None for p in pos):                            # nothing of this object is drawable
+            clamped += sum(1 for p in pos if p is None) if cls_ not in ET.VEHICLE else 0
             continue
         for r, p in zip(rs, pos):
-            if p is None:                                                 # a runaway row: not drawn this frame
-                clamped += 1
+            if p is None:                                                 # not drawn this frame
                 continue
             e, n, fell_back = p
             fr = int(r["frame"])

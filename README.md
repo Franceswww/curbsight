@@ -13,7 +13,7 @@ measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole minute is in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 3,627 road users in 71 minutes
+## 3,770 road users in 71 minutes
 
 ![Vehicle paths over one minute](figures/1min_vehicles.jpg)
 
@@ -30,11 +30,11 @@ from the same afternoon. That recording is not in the repository, only its figur
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*343 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*335 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*1,946 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*1,986 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
@@ -164,13 +164,22 @@ python track_clip_seg.py --video ../sample/cam04_1019.mp4 --out ../sample/cam04_
 To get the trajectories as data rather than as a video:
 
 ```bash
-python export_tracks.py --fused ../sample/fused.csv --clipdir ../sample --out ../out \
+python export_tracks.py --fused ../sample/fused.csv --out ../out \
     --start 15:02:07 --date 2026-10-19 --lot-file ../calibration/lot_sanford_cedar.json
 ```
 
 which writes one row per object per frame, with wall-clock time, latitude and longitude, and
 aerial-image pixel beside the metres, plus a line per trajectory in `tracks_summary.csv` giving its
 duration, path length, mean and top speed, and both endpoints, and the two trajectory figures.
+
+A vehicle is drawn only where its position behaves like a vehicle: on the lane network, and
+turning no tighter than its body can. The lane network is learned from the traffic itself, one hour
+of it, and shipped as `calibration/lane_field_sanford_cedar.json`; to rebuild it from a longer
+recording:
+
+```bash
+python build_lane_field.py --tracks ../out/tracks.csv --out ../calibration/lane_field_sanford_cedar.json
+```
 
 Over a long recording the lines overlap into a tangle, and presence reads better than paths:
 
@@ -184,7 +193,7 @@ python density.py --tracks ../out/tracks.csv --out ../out/density_vehicles.png -
 | | |
 |---|---|
 | `pipeline/` | the five steps, plus the export and the renderer |
-| `calibration/` | the solved camera models, the clicked control points, the base map, the ground surface |
+| `calibration/` | the solved camera models, the clicked control points, the base map, the ground surface, the lane network |
 | `sample/` | one minute, three cameras, 2026-10-19 15:02:07, with step 3 already done |
 | `figures/` | the pictures above, and the sample minute as video |
 
