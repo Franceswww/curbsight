@@ -397,6 +397,114 @@ def heatmap(points, base, E0, N1, res, label, out_path, cell_m=1.0):
     cv2.imwrite(out_path, img)
 
 
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+PAIR_COL = {"veh-ped": (0, 215, 255), "ped-veh": (0, 215, 255), "veh-veh": (255, 170, 70), "veh-bike": (90, 220, 90), "bike-veh": (90, 220, 90)}
+PAIR_NAME = {"veh-ped": "vehicle - pedestrian", "veh-veh": "vehicle - vehicle", "veh-bike": "vehicle - bicycle"}
+
+
+def pair_key(p):
+    return {"ped-veh": "veh-ped", "bike-veh": "veh-bike"}.get(p, p)
+
+
+def event_map(events, base, E0, N1, res, thr, label, out_path):
+    """every near-miss as one marker on the dimmed aerial: colour = who met whom, size = how close the call was
+    (a marker at the threshold is small, one at 0 s is large); the seconds are written beside each marker"""
+    img = (base * 0.55).astype(np.uint8)
+    H, W = img.shape[:2]
+    for d in sorted(events, key=lambda d: -d["seconds"]):                 # the closest calls drawn last, on top
+        q = (int(round((d["E"] - E0) / res)), int(round((N1 - d["N"]) / res)))
+        if not (0 <= q[0] < W and 0 <= q[1] < H):
+            continue
+        r = int(round(9 + 26 * (thr - min(d["seconds"], thr)) / thr))
+        col = PAIR_COL.get(d["pair"], (255, 255, 255))
+        cv2.circle(img, q, r, col, -1, cv2.LINE_AA); cv2.circle(img, q, r, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(img, "%.1f" % d["seconds"], (q[0] + r + 3, q[1] + 6), FONT, 0.55, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, "%.1f" % d["seconds"], (q[0] + r + 3, q[1] + 6), FONT, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, label, (24, 46), FONT, 1.0, (0, 0, 0), 5, cv2.LINE_AA)
+    cv2.putText(img, label, (24, 46), FONT, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+    # legend, bottom left
+    counts = defaultdict(int)
+    for d in events: counts[pair_key(d["pair"])] += 1
+    y = H - 30 - 34 * (len(PAIR_NAME) + 1)
+    cv2.rectangle(img, (18, y - 30), (560, H - 18), (20, 20, 20), -1)
+    for k in ("veh-ped", "veh-veh", "veh-bike"):
+        cv2.circle(img, (46, y), 12, PAIR_COL[k], -1, cv2.LINE_AA); cv2.circle(img, (46, y), 12, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(img, "%s: %d" % (PAIR_NAME[k], counts.get(k, 0)), (70, y + 8), FONT, 0.75, (255, 255, 255), 2, cv2.LINE_AA); y += 34
+    cv2.circle(img, (40, y), 9, (255, 255, 255), 1, cv2.LINE_AA); cv2.circle(img, (72, y), 35 // 2, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, "size: %.1f s  ->  0 s" % thr, (100, y + 8), FONT, 0.75, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.imwrite(out_path, img)
+
+
+def bar_chart(out_path, title, xticks, series, vline=None, width=1600, height=640, note=""):
+    """grouped bars with OpenCV. xticks: one label per bin ("" for none); series: [(name, colour, values)];
+    vline: a bin position (float, in bins) for a vertical threshold line"""
+    img = np.full((height, width, 3), 255, np.uint8)
+    L, R, T, B = 90, 40, 80, 110
+    W, H = width - L - R, height - T - B
+    n = max(1, len(xticks)); ymax = max(1, max(max(v) for _, _, v in series))
+    step = max(1, int(math.ceil(ymax / 5.0))); ymax = int(math.ceil(ymax / float(step))) * step
+    def Y(v): return T + H - int(round(v / float(ymax) * H))
+    for k in range(0, ymax + 1, step):
+        cv2.line(img, (L, Y(k)), (L + W, Y(k)), (228, 228, 228), 1)
+        cv2.putText(img, str(k), (L - 16 - 13 * len(str(k)), Y(k) + 7), FONT, 0.6, (70, 70, 70), 1, cv2.LINE_AA)
+    cv2.line(img, (L, T), (L, T + H), (0, 0, 0), 2); cv2.line(img, (L, T + H), (L + W, T + H), (0, 0, 0), 2)
+    gw = W / float(n); bw = gw / (len(series) + 1)
+    for si, (name, col, vals) in enumerate(series):
+        for i, v in enumerate(vals):
+            x0 = int(round(L + i * gw + bw * (si + 0.5))); x1 = int(round(x0 + bw))
+            if v > 0: cv2.rectangle(img, (x0, Y(v)), (x1, T + H), col, -1)
+    for i, lab in enumerate(xticks):
+        if lab: cv2.putText(img, lab, (int(L + i * gw) - 4, T + H + 28), FONT, 0.6, (70, 70, 70), 1, cv2.LINE_AA)
+    if vline is not None:
+        x = int(round(L + vline * gw)); cv2.line(img, (x, T), (x, T + H), (0, 0, 230), 2)
+        cv2.putText(img, "threshold", (x + 8, T + 22), FONT, 0.6, (0, 0, 230), 1, cv2.LINE_AA)
+    cv2.putText(img, title, (L, 48), FONT, 0.9, (0, 0, 0), 2, cv2.LINE_AA)
+    if note: cv2.putText(img, note, (L, height - 40), FONT, 0.6, (70, 70, 70), 1, cv2.LINE_AA)
+    for si, (name, col, _) in enumerate(series):
+        x = L + W - 620; y = T + 12 + 30 * si
+        cv2.rectangle(img, (x, y), (x + 24, y + 18), col, -1); cv2.putText(img, name, (x + 32, y + 16), FONT, 0.65, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.imwrite(out_path, img)
+
+
+def distributions(events, thr_ttc, thr_pet, out_path):
+    """the smallest TTC / PET of every encounter under 5 s, counted ones against the ones set aside"""
+    edges = np.arange(0, 5.001, 0.25)
+    panels = []
+    for m, thr in (("TTC", thr_ttc), ("PET", thr_pet)):
+        ev = [d for d in events if d["measure"] == m and (m == "TTC" or d["crossing"] == 1)]
+        kept = np.zeros(len(edges) - 1, int); aside = np.zeros(len(edges) - 1, int)
+        for d in ev:
+            b = min(int(d["seconds"] / 0.25), len(edges) - 2)
+            if d["flag"] == "": kept[b] += 1
+            else: aside[b] += 1
+        tmp = out_path + ".%s.png" % m.lower()
+        bar_chart(tmp, "%s: smallest value of each encounter under 5 s  (%d encounters)" % (m, len(ev)),
+                  ["%g" % e if abs(e - round(e)) < 1e-9 else "" for e in edges[:-1]],
+                  [("counted", (200, 120, 40), list(kept)),
+                   ("set aside (position error, duplicate, boarding, standing)", (190, 190, 190), list(aside))],
+                  vline=thr / 0.25, note="seconds")
+        panels.append(cv2.imread(tmp)); os.remove(tmp)
+    cv2.imwrite(out_path, np.vstack(panels))
+
+
+def over_time(events, clock, out_path, bin_s=300.0):
+    """near-misses per bin of bin_s seconds, TTC and PET side by side; only worth drawing past ten minutes"""
+    nm = [d for d in events if d["near_miss"]]
+    t_all = [d["t_sec"] for d in events]
+    if not t_all or max(t_all) - min(t_all) < 600:
+        return False
+    t0 = math.floor(min(t_all) / bin_s) * bin_s; nb = int(math.ceil((max(t_all) - t0) / bin_s)) + 1
+    ttc = np.zeros(nb, int); pet = np.zeros(nb, int)
+    for d in nm:
+        b = min(int((d["t_sec"] - t0) / bin_s), nb - 1)
+        if d["measure"] == "TTC": ttc[b] += 1
+        else: pet[b] += 1
+    labels = [clock(t0 + i * bin_s)[:5] if clock(t0) else "%d" % int((t0 + i * bin_s) // 60) for i in range(nb)]
+    bar_chart(out_path, "near-misses per %d minutes" % int(bin_s // 60), labels,
+              [("TTC", (60, 60, 220), list(ttc)), ("PET", (200, 120, 40), list(pet))], note="start of each bin")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tracks", required=True, help="tracks.csv from export_tracks.py")
@@ -458,6 +566,12 @@ def main():
         heatmap([(d["E"], d["N"]) for d in nm], base, E0, N1, RES,
                 "%s near-misses, %s <= %.1f s: %d events" % ("vehicle-pedestrian and vehicle-vehicle", m, thr, len(nm)),
                 os.path.join(a.out, "nearmiss_%s.png" % m.lower()))
+    nm_all = [d for d in events if d["near_miss"]]
+    event_map(nm_all, base, E0, N1, RES, max(a.ttc, a.pet),
+              "near-misses, TTC or PET at or under %.1f s: %d" % (max(a.ttc, a.pet), len(nm_all)), os.path.join(a.out, "nearmiss_events.png"))
+    distributions(events, a.ttc, a.pet, os.path.join(a.out, "nearmiss_distribution.png"))
+    if over_time(events, clock, os.path.join(a.out, "nearmiss_over_time.png")):
+        lines.append("near-misses over time: nearmiss_over_time.png")
     follow = sum(1 for d in events if d["measure"] == "PET" and d["crossing"] == 0 and d["flag"] == "" and d["seconds"] <= a.pet)
     lines.append("PET <= %.1f s between vehicles following in the same direction (headways, not drawn): %d" % (a.pet, follow))
     for m in ("TTC", "PET"):

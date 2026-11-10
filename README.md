@@ -13,28 +13,28 @@ were measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole two minutes are in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 2,972 road users in 71 minutes
+## 2,971 road users in 71 minutes
 
 ![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
 
-*Every vehicle path in the sample that lasts at least 3 seconds: 18 of them. Dot = where the track
+*Every vehicle path in the sample that lasts at least 3 seconds: 19 of them. Dot = where the track
 starts, arrow = where it ends.*
 
 ![Pedestrian paths over two minutes](figures/2min_pedestrians.jpg)
 
-*The same two minutes, pedestrians: 60 paths. Ninety-two road users in a hundred and twenty seconds,
-on a university campus at three in the afternoon.*
+*The same two minutes, pedestrians: 60 paths. Ninety-three road users in a hundred and twenty
+seconds, on a university campus at three in the afternoon.*
 
 Over a longer recording the shape of the place appears. These are the same scripts on 71 minutes
 from the same afternoon. That recording is not in the repository, only its figures:
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*376 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*374 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*2,170 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*2,172 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
@@ -58,15 +58,32 @@ near-miss is an encounter whose smallest value is at or under 1.5 s.
 
 ![Near-misses by post-encroachment time](figures/71min_nearmiss_pet.jpg)
 
-*The 71 minutes, PET at or under 1.5 s: 52 near-misses, 20 between two vehicles, 23 between a
+*The 71 minutes, PET at or under 1.5 s: 52 near-misses, 19 between two vehicles, 24 between a
 vehicle and a pedestrian, 9 between a vehicle and a bicycle. The hottest ground is the south-east
 corner, where the crossing meets the stop line; the string along the north-west arm is the bus stop,
 vehicles passing a bus as it pulls out. Vehicles following one another in the same direction under
-1.5 s (30 of them) are headways, not conflicts, and are left off the map.*
+1.5 s (29 of them) are headways, not conflicts, and are left off the map.*
 
 TTC at or under 1.5 s gives five near-misses in the same 71 minutes, three of them a car arriving
 behind a car waiting at the stop line on the east arm, one a car passing a bus pulling out of the
 north-west stop at 34 km/h.
+
+![Every near-miss, by who met whom and how close](figures/71min_nearmiss_events.jpg)
+
+*The same 57 events as markers. Yellow = a vehicle and a pedestrian, blue = two vehicles, green = a
+vehicle and a bicycle; the larger the marker, the closer the call, and the number beside it is the
+seconds. The vehicle-to-vehicle events line up along the bus stop; the pedestrians gather at the
+south-east corner.*
+
+![How close the encounters came](figures/71min_nearmiss_distribution.jpg)
+
+*Every encounter under 5 s by its smallest TTC (top) and PET (bottom). The red line is the 1.5 s
+threshold; the grey bars are encounters set aside for the reasons below. Nearly everything at a TTC
+of zero is grey: two measured bodies touching is position error, not a collision.*
+
+![Near-misses over the afternoon](figures/71min_nearmiss_over_time.jpg)
+
+*Near-misses per five minutes, TTC in red and PET in blue.*
 
 Not every small number is a near-miss. Positions carry about a metre of error, so an encounter is
 set aside when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the
@@ -249,7 +266,7 @@ the command line.
 
 **The "pedestrian" figure includes cyclists.** The code splits road users in two: cars, motorcycles,
 buses and lorries on one figure, everything else on the other. A cyclist is detected as a bicycle and
-so lands with the pedestrians. Over the 71 minutes that is 64 bicycles among 2,518 pedestrians.
+so lands with the pedestrians. Over the 71 minutes that is 68 bicycles among 2,517 pedestrians.
 
 **Parking is not traffic.** A car standing in a bay is still detected every frame, and its solved
 centre drifts a metre or two as the cameras see more or less of it. Drawn, it looks like a vehicle
@@ -262,12 +279,13 @@ the vehicle has actually moved a couple of metres. A car creeping into a bay kee
 it last had out on the aisle, which is why it is better not to draw it at all than to draw it
 pointing the wrong way.
 
-**Two road users can end up as one.** The merge links detections that are close in space and time,
-and a chain of such links can run from one vehicle to the next: in the sample, a bus leaving by the
-south-east arm passes within three metres of a car waiting in the opposite lane, the two are linked,
-and the car's whole drive through the junction is then carried under the bus's identity and class
-(object 80). The pickup in front of that car and the bus behind it are detected in every frame; one
-of the three is drawn.
+**Two road users can end up as one.** The merge links camera tracks that run close together, and a
+chain of such links can join vehicles that were never near each other. Two rules catch the cases
+seen so far: an occlusion bridge joins a vehicle only to one of its own class, and two vehicle
+objects on top of each other are taken for one vehicle only when their classes agree. On the
+two-minute sample no object is now built from tracks of different classes and no object jumps
+between two places; over 71 minutes, 2 of 604 vehicle objects still mix a bus track with a car
+track, and none jumps.
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this

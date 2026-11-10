@@ -339,7 +339,10 @@ def main():
                              cam=near[0], n_cams=len(L), src="|".join(f"{d[0]}:{d[1]}" for d in L), dist_m=round(near[5], 1), filled=0))
     # second-level merge: two VEHICLE objects that sit on top of each other for most of their common frames are one
     # vehicle (a bus whose front survived as its own track, two views that never linked because of the one-partner
-    # rule). Criterion: coexist >= 6 frames and the centres are within 0.6 L of the larger class in >= 70 % of them.
+    # rule). Criterion: coexist >= 6 frames and the centres are within 0.6 L of the larger class in >= 70 % of them,
+    # and the two objects carry the same class. Without the class condition a bus leaving the junction and a car
+    # waiting in the opposite lane, 3 to 6 m apart for the seven frames the bus takes to pass, were one vehicle
+    # (two-minute sample, objects 38 and 80), and the car's whole drive was carried under the bus's identity.
     by_obj = defaultdict(dict)
     for k, r in enumerate(rows):
         if r["cls"] != "Pedestrian": by_obj[r["gid"]][r["frame"]] = k
@@ -353,6 +356,8 @@ def main():
             La = RD.SIZE.get(rows[by_obj[a_][common[0]]]["cls"], (4.5, 1.9))[0]; Lb = RD.SIZE.get(rows[by_obj[b_][common[0]]]["cls"], (4.5, 1.9))[0]
             tol = 0.6 * max(La, Lb)
             close = [np.hypot(rows[by_obj[a_][f]]["Ec"] - rows[by_obj[b_][f]]["Ec"], rows[by_obj[a_][f]]["Nc"] - rows[by_obj[b_][f]]["Nc"]) < tol for f in common]
+            if rows[by_obj[a_][common[0]]]["cls"] != rows[by_obj[b_][common[0]]]["cls"]:
+                continue                                                                 # a bus and a car are not one vehicle seen twice
             if np.mean(close) >= 0.7:
                 big, small = (a_, b_) if len(by_obj[a_]) >= len(by_obj[b_]) else (b_, a_); alias[small] = big; dup_merged += 1
     if alias:
