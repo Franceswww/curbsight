@@ -22,6 +22,7 @@ queue, the bike box - is never cut. Pedestrians are never cut; standing at a ker
 """
 import argparse
 import csv
+import glob
 import json
 import math
 import os
@@ -136,73 +137,53 @@ def vehicle_runs(T, P, cls, field, min_s=2.0, min_m=5.0):
     return runs
 
 
-BODY = {"Pedestrian": (0.6, 0.5), "Passenger Vehicle": (4.5, 1.9), "Truck": (5.5, 2.1),
-        "Bus": (10.5, 2.6), "Motorcycle": (2.0, 0.8), "Bicycle": (1.8, 0.6)}    # metres, length x width
-
-
-def reach(cls):
-    """how far an object's centre can possibly sit from its own foot point: half its body diagonal,
-    plus 30 cm for where the foot point actually lands. The same bound centre_from_box already
-    enforces inside its own solve (render_demo.py), applied once more to the fused result."""
-    L, W = BODY.get(cls, (4.5, 1.9))
-    return 0.5 * math.hypot(L, W) + 0.3
-
-
-def centre_or_foot(rows, cls, clamp, runaway_share=0.05):
-    """For one object's rows in frame order: where to draw it, or None for a row not to draw.
-    Returns [(e, n, fell_back) | None, ...].
-
-    Each row carries a measured foot point and a Kalman-smoothed centre. The centre is the better
-    position while the smoother is tracking its object, and a runaway when it is not: on this
-    recording one pedestrian's centre ends 676 m from a foot point that never left a 60 m circle.
-    The push, the distance between the two, tells them apart: a real centre cannot be further from
-    its foot point than the body allows, and every class's 99th-percentile push sits near one reach.
-
-    The decision is made once per track, never per row. Before any of this existed, the figures
-    drew the centre alone and had no reversal and no step over 30 m/s on 396 vehicle paths. Three
-    row-wise versions then each drew artefacts: a hard switch flipped a bus every frame (489
-    reversals), hysteresis made the switch itself a 6.8 m jump, and a continuous blend jumped
-    whenever the foot point it was blending toward re-anchored on another part of the car. The
-    centre is smooth and the foot point is not, and any row-wise mix of the two inherits the jumps.
-
-    So: if more than `runaway_share` of a track's rows have a push beyond `clamp` reaches, the
-    smoother has lost this object and the whole track is drawn from the median-smoothed foot
-    point. Otherwise the whole track is drawn from the centre, and the rare rows beyond the bound
-    are dropped, which the caller draws as a break in the line rather than a line across the gap.
-    """
-    if not rows or clamp <= 0 or not rows[0].get("Ec"):
-        return [(float(r["E"]), float(r["N"]), False) for r in rows]
-    hi = clamp * reach(cls)
-    E = np.array([float(r["E"]) for r in rows]); N = np.array([float(r["N"]) for r in rows])
-    half = 2
-    Es = np.array([np.median(E[max(0, i - half):i + half + 1]) for i in range(len(E))])
-    Ns = np.array([np.median(N[max(0, i - half):i + half + 1]) for i in range(len(N))])
-    has = np.array([bool(r.get("Ec")) for r in rows])
-    Ec = np.array([float(r["Ec"]) if r.get("Ec") else np.nan for r in rows])
-    Nc = np.array([float(r["Nc"]) if r.get("Nc") else np.nan for r in rows])
-    push = np.where(has, np.hypot(Ec - Es, Nc - Ns), 0.0)
-    runaway = push > hi
-    if runaway.mean() > runaway_share:                               # the smoother lost this object
-        # For a vehicle there is nothing left to draw. The centre flies off, and the foot point on
-        # such a track jumps several metres in a frame too (eight of these were the last paths the
-        # plausibility check flagged, every one in this state). A vehicle is reported only when
-        # its smoothed position stayed with its measurement. A pedestrian's centre is its foot
-        # point give or take half a metre, so the smoothed foot point is a fair place to draw it.
-        if cls in VEHICLE:
-            return [None] * len(rows)
-        return [(float(Es[i]), float(Ns[i]), True) for i in range(len(rows))]
-    out = []
-    for i in range(len(rows)):
-        if not has[i]:
-            out.append((float(E[i]), float(N[i]), False))
-        elif runaway[i]:
-            out.append(None)                                         # a break, not a line
-        else:
-            out.append((float(Ec[i]), float(Nc[i]), False))
-    return out
-
-
 HEAD_M, HEAD_HALFW_M = 0.8, 0.26                                  # arrow head, metres on the ground
+
+
+MAX_SPEED = {"Pedestrian": 4.0, "Bicycle": 10.0}      # m/s; a sprint is 3 and a fast cyclist 9
+CAMERA_REACH_M = 55.0                                    # detections stop at 45 m; past this is extrapolation
+
+
+def load_pole():
+    """the cameras' mean position, from the solved models; the reach test is measured from here"""
+    cs = []
+    for p in glob.glob(os.path.join(OUTR, "*_fit_pnp", "cam.json")):
+        cs.append(json.load(open(p))["centre"][:2])
+    return np.mean(cs, axis=0) if cs else None
+
+
+def person_runs(T, P, cls, pole, min_s=1.0):
+    """The stretches of a pedestrian or bicycle path worth drawing: moving no faster than a body of
+    that kind can, and within what the cameras can see. Returns a list of index arrays.
+
+    The position is the smoothed centre and nothing else. An earlier version fell back to the
+    measured foot point when the centre looked lost, and the foot point is the mask's bottom edge:
+    it wobbles half a metre between frames, and 313 pedestrian paths came out as rows of thorns.
+    The centre is smooth where the smoother was following its object; where it was not, the
+    centre either jumps (caught by speed) or drifts away (caught by reach), and either way that
+    stretch is cut and the path breaks there.
+    """
+    n = len(P)
+    keep = np.ones(n, bool)
+    vmax = MAX_SPEED.get(cls, 4.0)
+    for i in range(1, n):
+        dt = max(T[i] - T[i - 1], 1e-3)
+        if np.hypot(*(P[i] - P[i - 1])) / dt > vmax:
+            keep[i] = False
+    if pole is not None:
+        keep &= np.hypot(*(P - pole).T) <= CAMERA_REACH_M
+    runs, i = [], 0
+    while i < n:
+        if not keep[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and keep[j + 1]:
+            j += 1
+        if T[j] - T[i] >= min_s:
+            runs.append(np.arange(i, j + 1))
+        i = j + 1
+    return runs
 
 
 def arrow_head(img, a, b, col, res=0.04):
@@ -233,8 +214,16 @@ def plausibility(by_gid, fps, step_m=0.4):
     was already published, because nothing counted. Now something counts.
     """
     bad = []
+    slow = 0
     for gid, os_ in by_gid.items():
-        if os_[0]["cls"] not in VEHICLE or len(os_) < 20:
+        if len(os_) < 20:
+            continue
+        F = np.array([o["frame"] for o in os_])
+        inside = np.diff(F) <= 3                                           # steps within one drawn piece only
+        if os_[0]["cls"] not in VEHICLE:
+            P = np.array([[o["E"], o["N"]] for o in os_]); T = np.array([o["t_sec"] for o in os_])
+            v = np.hypot(*np.diff(P, axis=0).T) / np.maximum(np.diff(T), 1.0 / fps)
+            slow += bool((v[inside] > 1.05 * MAX_SPEED.get(os_[0]["cls"], 4.0)).any())   # 5% for t_sec rounding
             continue
         P = np.array([[o["E"], o["N"]] for o in os_])
         T = np.array([o["t_sec"] for o in os_])
@@ -247,17 +236,19 @@ def plausibility(by_gid, fps, step_m=0.4):
         if rev or top > 30:
             bad.append((rev, top, gid, os_[0]["cls"]))
     bad.sort(reverse=True)
-    print("plausibility: %d vehicle paths with a reversal or a step over 30 m/s" % len(bad))
+    print("plausibility: %d vehicle paths with a reversal or a step over 30 m/s; %d pedestrian or bicycle "
+          "paths with a step faster than the body can move" % (len(bad), slow))
     for rev, top, gid, cls in bad[:8]:
         print("   gid %-6d %-18s %3d reversals, fastest step %5.1f m/s" % (gid, cls, rev, top))
     return len(bad)
 
 
 def pieces(os_, mpx, fps, gap_s=1.0):
-    """a path split wherever rows are missing, so a dropped stretch is a break and not a long line"""
+    """a path split wherever a processed frame is missing, so a cut stretch is a break and never a
+    line drawn across it; every second frame was processed, so consecutive rows are two frames apart"""
     out, run = [], []
     for o in os_:
-        if run and o["t_sec"] - run[-1]["t_sec"] > gap_s:
+        if run and o["frame"] - run[-1]["frame"] > 3:
             out.append(run); run = []
         run.append(o)
     if run:
@@ -277,10 +268,6 @@ def main():
     ap.add_argument("--lane-field", default=os.path.join(OUTR, "lane_field_sanford_cedar.json"),
                     help="build_lane_field.py output; vehicle positions off it are not drawn")
     ap.add_argument("--min-s", type=float, default=3.0, help="paths shorter than this are drawn grey")
-    ap.add_argument("--centre-clamp", type=float, default=3.0,
-                    help="pedestrians and bicycles: a track with more than 5%% of rows pushed beyond "
-                         "this many body-reaches from its own foot point is drawn from the smoothed "
-                         "foot point; 0 disables the check")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -321,7 +308,8 @@ def main():
     field = load_lane_field(a.lane_field) if a.lane_field and os.path.exists(a.lane_field) else None
     if field is None:
         print("no lane field: vehicles are checked for curvature only (build one with build_lane_field.py)")
-    out_rows, summary, clamped, emptied, lot_hidden, not_vehicle, cut_rows = [], [], 0, 0, 0, 0, 0
+    pole = load_pole()
+    out_rows, summary, lot_hidden, not_vehicle, not_person, cut_rows = [], [], 0, 0, 0, 0
     for gid, rs in sorted(rows.items()):
         cls = rs[0]["cls"]
         if cls in VEHICLE:
@@ -345,19 +333,16 @@ def main():
             rs = [rs[i] for i in keep]
             pts = [(int(frames[i]), float(P[i][0]), float(P[i][1])) for i in keep]
         else:
-            placed = centre_or_foot(rs, cls, a.centre_clamp)
-            pts, rs2 = [], []
-            for r, pos in zip(rs, placed):
-                if pos is None:
-                    clamped += 1
-                    continue
-                e, n, fell_back = pos
-                pts.append((int(r["frame"]), e, n)); rs2.append(r)
-                clamped += fell_back
-            rs = rs2
-            if len(pts) < 2:
-                emptied += 1
+            frames = np.array([int(r["frame"]) for r in rs])
+            P = np.array([[float(r["Ec"] or r["E"]), float(r["Nc"] or r["N"])] for r in rs])
+            runs = person_runs(frames / a.fps, P, cls, pole)
+            if not runs:
+                not_person += 1
                 continue
+            keep = np.concatenate(runs)
+            cut_rows += len(rs) - len(keep)
+            rs = [rs[i] for i in keep]
+            pts = [(int(frames[i]), float(P[i][0]), float(P[i][1])) for i in keep]
 
         path = 0.0
         for k in range(len(pts) - 1):
@@ -434,10 +419,10 @@ def main():
         print("%s: %d paths drawn" % (tag, drawn))
 
     plausibility(by_gid, a.fps)
-    print("%d objects, %d rows written; vehicles: %d hidden in the parking bays, %d with no stretch "
-          "that moves like a vehicle on the lanes, %d rows cut off the lanes or inside a turn too tight; "
-          "pedestrians: %d rows placed at or dropped for a runaway centre, %d objects emptied"
-          % (len(summary), len(out_rows), lot_hidden, not_vehicle, cut_rows, clamped, emptied))
+    print("%d objects, %d rows written; %d vehicles hidden in the parking bays; %d vehicles and %d people "
+          "with no stretch that moves like one; %d rows cut (off the lanes, inside a turn too tight, "
+          "faster than a body can move, or beyond the cameras' reach)"
+          % (len(summary), len(out_rows), lot_hidden, not_vehicle, not_person, cut_rows))
 
 
 if __name__ == "__main__":

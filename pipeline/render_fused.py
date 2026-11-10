@@ -68,6 +68,7 @@ def main():
     with open(os.path.join(a.clipdir, "fused.csv"), encoding="utf-8") as f:
         for r in csv.DictReader(f): by_gid[int(r["gid"])].append(r)
     field = ET.load_lane_field(a.lane_field) if a.lane_field and os.path.exists(a.lane_field) else None
+    pole = ET.load_pole()
     for g, rs in by_gid.items():
         rs.sort(key=lambda r: int(r["frame"]))
         # Ec/Nc = vehicle centre (fuse_tracks.py pushes each camera's foot point before averaging); older
@@ -83,10 +84,18 @@ def main():
             keep_ = set(int(i) for run in runs for i in run)
             clamped += len(rs) - len(keep_)
             pos = [(float(P_[i][0]), float(P_[i][1]), False) if i in keep_ else None for i in range(len(rs))]
+        elif centred:
+            # people and bicycles: the smoothed centre, cut where it moves faster than a body can or
+            # drifts beyond the cameras' reach (export_tracks.person_runs); never the raw foot point
+            P_ = np.array([[float(r["Ec"]), float(r["Nc"])] for r in rs])
+            T_ = np.array([int(r["frame"]) for r in rs]) / fps
+            runs = ET.person_runs(T_, P_, cls_, pole)
+            keep_ = set(int(i) for run in runs for i in run)
+            clamped += len(rs) - len(keep_)
+            pos = [(float(P_[i][0]), float(P_[i][1]), False) if i in keep_ else None for i in range(len(rs))]
         else:
-            pos = ET.centre_or_foot(rs, cls_, a.centre_clamp) if centred else [(float(r["E"]), float(r["N"]), False) for r in rs]
+            pos = [(float(r["E"]), float(r["N"]), False) for r in rs]
         if rs and all(p is None for p in pos):                            # nothing of this object is drawable
-            clamped += sum(1 for p in pos if p is None) if cls_ not in ET.VEHICLE else 0
             continue
         for r, p in zip(rs, pos):
             if p is None:                                                 # not drawn this frame
