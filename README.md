@@ -178,12 +178,20 @@ Measured at this intersection against three independent references, on separate 
 | GNSS car, pass 2 | the same car, second pass | 19 / 72 cm |
 | pedestrians, set 1 | people seen by a lidar mounted on that car | 71 / 108 cm |
 | pedestrians, set 2 | ditto, second recording | 34 / 75 cm |
-| other vehicles | the lidar's view of ordinary traffic, matched one-to-one | 109 / 197 cm |
+| other vehicles | the lidar's view of ordinary traffic, matched one-to-one, its track smoothed | 93 / 171 cm |
+| buses and trucks | the same, the long vehicles on their own | 84 / 184 cm |
 
 The car that can be checked most precisely sits at 19–59 cm. Ordinary traffic, which the pipeline
 was never tuned on and whose real size it has to assume, sits near a metre. That gap is a position
 error rather than a heading or size error: once a vehicle is moving, its heading agrees with its own
 direction of travel to about a degree.
+
+The lidar's own view of a vehicle is one scan every tenth of a second, and the point of the cluster
+nearest the car jumps between the bumper and the side as the geometry changes, by about a metre at
+the 90th percentile. So each lidar vehicle track is smoothed first (a robust straight line through
+the half-second around each scan, outliers dropped) and the camera is scored against the smoothed
+track; against the raw scans the same vehicles read 108 / 197 and 95 / 194 cm. The pedestrian and
+GNSS rows need no such step: their tracks move by 1–3 cm between scans.
 
 ## Running it
 
