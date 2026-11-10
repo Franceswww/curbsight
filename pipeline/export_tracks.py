@@ -132,22 +132,58 @@ def reach(cls):
     return 0.5 * math.hypot(L, W) + 0.3
 
 
-def centre_or_foot(r, cls, clamp):
-    """the solved centre, unless it has wandered further from its measurement than a body allows.
+def centre_or_foot(rows, cls, clamp, runaway_share=0.05):
+    """For one object's rows in frame order: where to draw it, or None for a row not to draw.
+    Returns [(e, n, fell_back) | None, ...].
 
-    fuse_tracks.py runs a Kalman smoother on the centre, and a smoother that loses its object does
-    not stop: on this recording one pedestrian's centre ends up 676 m away while its own foot point
-    never leaves a 60 m circle. Those are the trajectories that fly off across the roofs, and the
-    milder ones are what put a car on the footway. The foot point is the measured quantity and it
-    never does this, so when the two disagree by more than a body, the measurement wins.
+    Each row carries a measured foot point and a Kalman-smoothed centre. The centre is the better
+    position while the smoother is tracking its object, and a runaway when it is not: on this
+    recording one pedestrian's centre ends 676 m from a foot point that never left a 60 m circle.
+    The push, the distance between the two, tells them apart: a real centre cannot be further from
+    its foot point than the body allows, and every class's 99th-percentile push sits near one reach.
+
+    The decision is made once per track, never per row. Before any of this existed, the figures
+    drew the centre alone and had no reversal and no step over 30 m/s on 396 vehicle paths. Three
+    row-wise versions then each drew artefacts: a hard switch flipped a bus every frame (489
+    reversals), hysteresis made the switch itself a 6.8 m jump, and a continuous blend jumped
+    whenever the foot point it was blending toward re-anchored on another part of the car. The
+    centre is smooth and the foot point is not, and any row-wise mix of the two inherits the jumps.
+
+    So: if more than `runaway_share` of a track's rows have a push beyond `clamp` reaches, the
+    smoother has lost this object and the whole track is drawn from the median-smoothed foot
+    point. Otherwise the whole track is drawn from the centre, and the rare rows beyond the bound
+    are dropped, which the caller draws as a break in the line rather than a line across the gap.
     """
-    e, n = float(r["E"]), float(r["N"])
-    if not r.get("Ec"):
-        return e, n, False
-    ec, nc = float(r["Ec"]), float(r["Nc"])
-    if clamp > 0 and math.hypot(ec - e, nc - n) > clamp * reach(cls):
-        return e, n, True
-    return ec, nc, False
+    if not rows or clamp <= 0 or not rows[0].get("Ec"):
+        return [(float(r["E"]), float(r["N"]), False) for r in rows]
+    hi = clamp * reach(cls)
+    E = np.array([float(r["E"]) for r in rows]); N = np.array([float(r["N"]) for r in rows])
+    half = 2
+    Es = np.array([np.median(E[max(0, i - half):i + half + 1]) for i in range(len(E))])
+    Ns = np.array([np.median(N[max(0, i - half):i + half + 1]) for i in range(len(N))])
+    has = np.array([bool(r.get("Ec")) for r in rows])
+    Ec = np.array([float(r["Ec"]) if r.get("Ec") else np.nan for r in rows])
+    Nc = np.array([float(r["Nc"]) if r.get("Nc") else np.nan for r in rows])
+    push = np.where(has, np.hypot(Ec - Es, Nc - Ns), 0.0)
+    runaway = push > hi
+    if runaway.mean() > runaway_share:                               # the smoother lost this object
+        # For a vehicle there is nothing left to draw. The centre flies off, and the foot point on
+        # such a track jumps several metres in a frame too (eight of these were the last paths the
+        # plausibility check flagged, every one in this state). A vehicle is reported only when
+        # its smoothed position stayed with its measurement. A pedestrian's centre is its foot
+        # point give or take half a metre, so the smoothed foot point is a fair place to draw it.
+        if cls in VEHICLE:
+            return [None] * len(rows)
+        return [(float(Es[i]), float(Ns[i]), True) for i in range(len(rows))]
+    out = []
+    for i in range(len(rows)):
+        if not has[i]:
+            out.append((float(E[i]), float(N[i]), False))
+        elif runaway[i]:
+            out.append(None)                                         # a break, not a line
+        else:
+            out.append((float(Ec[i]), float(Nc[i]), False))
+    return out
 
 
 HEAD_M, HEAD_HALFW_M = 0.8, 0.26                                  # arrow head, metres on the ground
@@ -169,6 +205,36 @@ def arrow_head(img, a, b, col, res=0.04):
     back = np.array(b, float) - u * (HEAD_M / res)
     cv2.fillConvexPoly(img, np.array([b, back + n * (HEAD_HALFW_M / res),
                                       back - n * (HEAD_HALFW_M / res)], np.int32), col, cv2.LINE_AA)
+
+
+def plausibility(by_gid, fps, step_m=0.4):
+    """Count the things a vehicle cannot physically do, and say so before anyone looks at the figure.
+
+    A reversal is two consecutive steps, each longer than step_m, that turn by more than 120
+    degrees: a car that goes forward a metre and then straight back. Real traffic does this never;
+    a position that flips between two estimates does it every frame. The first version of the
+    centre clamp in this file did exactly that to 22 bus paths and nobody noticed until the figure
+    was already published, because nothing counted. Now something counts.
+    """
+    bad = []
+    for gid, os_ in by_gid.items():
+        if os_[0]["cls"] not in VEHICLE or len(os_) < 20:
+            continue
+        P = np.array([[o["E"], o["N"]] for o in os_])
+        T = np.array([o["t_sec"] for o in os_])
+        d = np.diff(P, axis=0)
+        L = np.hypot(*d.T)
+        dt = np.maximum(np.diff(T), 1.0 / fps)                            # a gap is real time, not one frame
+        rev = sum(1 for i in range(1, len(d))
+                  if L[i] > step_m and L[i - 1] > step_m and float(d[i] @ d[i - 1]) / (L[i] * L[i - 1]) < -0.5)
+        top = float(np.max(L / dt)) if len(L) else 0.0                   # fastest step, m/s over its real duration
+        if rev or top > 30:
+            bad.append((rev, top, gid, os_[0]["cls"]))
+    bad.sort(reverse=True)
+    print("plausibility: %d vehicle paths with a reversal or a step over 30 m/s" % len(bad))
+    for rev, top, gid, cls in bad[:8]:
+        print("   gid %-6d %-18s %3d reversals, fastest step %5.1f m/s" % (gid, cls, rev, top))
+    return len(bad)
 
 
 def pieces(os_, mpx, fps, gap_s=1.0):
@@ -207,9 +273,10 @@ def main():
     ap.add_argument("--max-disagree", type=float, default=2.0,
                     help="drop a fused row whose cameras disagree by more than this many linking "
                          "gates: they were not looking at one object. 0 disables")
-    ap.add_argument("--centre-clamp", type=float, default=1.0,
-                    help="reject a solved centre further than this many body-reaches from its own "
-                         "foot point and use the foot point instead; 0 disables the check")
+    ap.add_argument("--centre-clamp", type=float, default=3.0,
+                    help="a track with more than 5%% of its rows pushed beyond this many body-reaches "
+                         "from its own foot point is drawn from the smoothed foot point; on other "
+                         "tracks such rows are left out; 0 disables the check")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -248,18 +315,24 @@ def main():
         t0 = hh * 3600 + mm * 60 + ss
 
     cam_pts = camera_points(a.clipdir, a.cams.split(",")) if a.clipdir else {}
-    out_rows, summary, cut, dropped, clamped, split, emptied = [], [], 0, 0, 0, 0, 0
+    out_rows, summary, cut, dropped, clamped, split, emptied, lost_runaway = [], [], 0, 0, 0, 0, 0, 0
     for gid, rs in sorted(rows.items()):
         cls = rs[0]["cls"]
-        pts, kept_rs = [], []
-        for r in rs:
-            if cameras_disagree(r, cls, cam_pts, a.max_disagree):
-                split += 1
+        kept_rs = [r for r in rs if not cameras_disagree(r, cls, cam_pts, a.max_disagree)]
+        split += len(rs) - len(kept_rs)
+        placed = centre_or_foot(kept_rs, cls, a.centre_clamp)
+        if kept_rs and all(p is None for p in placed):              # a vehicle the smoother lost
+            lost_runaway += 1
+            continue
+        pts, rs2 = [], []
+        for r, pos in zip(kept_rs, placed):
+            if pos is None:                                          # a runaway row on a sound track
+                clamped += 1
                 continue
-            e, n, fell_back = centre_or_foot(r, cls, a.centre_clamp)
-            pts.append((int(r["frame"]), e, n))
-            kept_rs.append(r)
+            e, n, fell_back = pos
+            pts.append((int(r["frame"]), e, n)); rs2.append(r)
             clamped += fell_back
+        kept_rs = rs2
         if len(pts) < 2:
             emptied += 1
             continue
@@ -366,10 +439,12 @@ def main():
         cv2.imwrite(os.path.join(a.out, "trajectories_%s.png" % tag), img)
         print("%s: %d paths drawn" % (tag, drawn))
 
+    plausibility(by_gid, a.fps)
     print("%d objects, %d rows written; %d rows cut as standing, %d vehicles dropped as never "
-          "moving; %d diverged centres replaced by their foot point; %d rows dropped and %d objects "
-          "lost entirely because the cameras disagreed"
-          % (len(summary), len(out_rows), cut, dropped, clamped, split, emptied))
+          "moving; %d rows placed at or dropped for a runaway centre, %d vehicles not drawn because "
+          "their centre ran away; %d rows dropped and %d objects lost entirely because the cameras "
+          "disagreed"
+          % (len(summary), len(out_rows), cut, dropped, clamped, lost_runaway, split, emptied))
 
 
 if __name__ == "__main__":

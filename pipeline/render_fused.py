@@ -34,9 +34,9 @@ def main():
     ap.add_argument("--truth-objects", default=None, help="lidar_objects.csv: draw the road users the LiDAR saw (white = pedestrian, grey = vehicle cluster)")
     ap.add_argument("--rec-start", type=float, default=None, help="recording offset of the clip's first frame, s (needed with --truth)")
     ap.add_argument("--centre-offset", type=float, default=1.46)
-    ap.add_argument("--centre-clamp", type=float, default=1.0,
-                    help="same as export_tracks.py: reject a solved centre further than this many "
-                         "body-reaches from its own foot point; 0 disables the check")
+    ap.add_argument("--centre-clamp", type=float, default=3.0,
+                    help="same as export_tracks.py: a track with over 5%% of rows pushed beyond this many "
+                         "body-reaches is drawn from the smoothed foot point, other such rows are skipped")
     ap.add_argument("--bay-dirs", action="store_true",
                     help="a vehicle that never drives takes its direction from the parked cars around it in the aerial")
     ap.add_argument("--lot-file", default=None, help="a parking area drawn by hand (see "
@@ -60,15 +60,26 @@ def main():
     caps = {c: cv2.VideoCapture([os.path.join(a.clipdir, f) for f in os.listdir(a.clipdir) if f.startswith(c) and f.endswith(".mp4")][0]) for c in cams}
     fps = caps[cam_names[0]].get(cv2.CAP_PROP_FPS); fps_out = a.fps_out or fps / 2
     fused = defaultdict(list); hist = defaultdict(list); push = {}; gid_of = {}; centred = False; hdg_csv = {}; clamped = 0
+    # rows are grouped per object first: the centre-or-foot decision is made along a whole track with
+    # hysteresis (export_tracks.centre_or_foot), not row by row, so the map and the figures agree
+    by_gid = defaultdict(list)
     with open(os.path.join(a.clipdir, "fused.csv"), encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            # Ec/Nc = vehicle centre (fuse_tracks.py pushes each camera's foot point before averaging); older
-            # fused.csv files carry the foot point only and the push is done here at draw time
-            centred = "Ec" in r
-            fr, g = int(r["frame"]), int(r["gid"])
-            # the same guard export_tracks.py applies: a smoothed centre that has drifted further from
-            # its own foot point than a body is wide has lost its object, so the measurement wins
-            e, n, fell_back = ET.centre_or_foot(r, r["cls"], a.centre_clamp) if centred else (float(r["E"]), float(r["N"]), False)
+        for r in csv.DictReader(f): by_gid[int(r["gid"])].append(r)
+    for g, rs in by_gid.items():
+        rs.sort(key=lambda r: int(r["frame"]))
+        # Ec/Nc = vehicle centre (fuse_tracks.py pushes each camera's foot point before averaging); older
+        # fused.csv files carry the foot point only and the push is done here at draw time
+        centred = "Ec" in rs[0]
+        pos = ET.centre_or_foot(rs, rs[0]["cls"], a.centre_clamp) if centred else [(float(r["E"]), float(r["N"]), False) for r in rs]
+        if rs and all(p is None for p in pos):                            # a vehicle the smoother lost: not drawn at all
+            clamped += len(rs)
+            continue
+        for r, p in zip(rs, pos):
+            if p is None:                                                 # a runaway row: not drawn this frame
+                clamped += 1
+                continue
+            e, n, fell_back = p
+            fr = int(r["frame"])
             clamped += fell_back
             fused[fr].append(dict(gid=g, cls=r["cls"], e=e, n=n, cam=r["cam"], n_cams=int(r["n_cams"]))); hist[g].append((fr, e, n))
             for src in r.get("src", "").split("|"):                      # camera track -> global id, for the labels in the views

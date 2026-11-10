@@ -13,7 +13,7 @@ measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole minute is in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 3,677 road users in 71 minutes
+## 3,627 road users in 71 minutes
 
 ![Vehicle paths over one minute](figures/1min_vehicles.jpg)
 
@@ -30,11 +30,11 @@ from the same afternoon. That recording is not in the repository, only its figur
 
 ![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
 
-*356 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+*343 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*1,948 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*1,946 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
