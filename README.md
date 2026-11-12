@@ -13,7 +13,7 @@ were measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole two minutes are in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 2,971 road users in 71 minutes
+## 3,005 road users in 71 minutes
 
 ![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
 
@@ -34,7 +34,7 @@ from the same afternoon. That recording is not in the repository, only its figur
 
 ![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
 
-*2,172 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+*2,202 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
 
 ![Pedestrian presence](figures/71min_density_pedestrians.jpg)
 
@@ -64,9 +64,9 @@ corner, where the crossing meets the stop line; the string along the north-west 
 vehicles passing a bus as it pulls out. Vehicles following one another in the same direction under
 1.5 s (29 of them) are headways, not conflicts, and are left off the map.*
 
-TTC at or under 1.5 s gives five near-misses in the same 71 minutes, three of them a car arriving
-behind a car waiting at the stop line on the east arm, one a car passing a bus pulling out of the
-north-west stop at 34 km/h.
+TTC at or under 1.5 s gives four near-misses in the same 71 minutes, three of them a car arriving
+behind a car waiting at the stop line on the east arm, one a car passing a pedestrian at 37 km/h
+near the middle of the junction.
 
 ![Every near-miss, by who met whom and how close](figures/71min_nearmiss_events.jpg)
 
@@ -130,10 +130,12 @@ checking, because it is a real pole you can go and look at.
 |---|---|---|---|
 | cam02 | 88 | 9 cm | 32 cm |
 | cam03 | 101 | 17 cm | 41 cm |
-| cam04 | 47 | 32 cm | 71 cm |
+| cam04 | 76 | 34 cm | 74 cm |
 
 Those are how far the clicked points land from where they should, measured on the ground. cam04 is
-the worst of the three and also the one with the fewest points; more points is the obvious fix.
+the worst of the three. Its far field is where hand-picked points are hardest to place, so 29 of its
+76 points come from pedestrians seen by the lidar: the foot pixel of each sighting paired with the lidar
+position. Held out of the fit, the first set of lidar pedestrians went from 71 to 54 cm with those points.
 
 A median is one number and it hides everything, so the points are in the repository as pictures. The
 same point carries the same number and the same colour in the camera frame and on the aerial
@@ -168,20 +170,20 @@ cd pipeline
 python plot_control_points.py
 ```
 
-## 19-59 cm against a survey-grade GNSS track
+## 19-53 cm against a survey-grade GNSS track
 
 Measured at this intersection against three independent references, on separate recordings.
 
 | reference | what it is | position error, median / 90% |
 |---|---|---|
-| GNSS car, pass 1 | a car carrying a survey-grade receiver, driven through | 59 / 108 cm |
+| GNSS car, pass 1 | a car carrying a survey-grade receiver, driven through | 53 / 108 cm |
 | GNSS car, pass 2 | the same car, second pass | 19 / 72 cm |
-| pedestrians, set 1 | people seen by a lidar mounted on that car | 71 / 108 cm |
-| pedestrians, set 2 | ditto, second recording | 34 / 75 cm |
+| pedestrians, set 1 | people seen by a lidar mounted on that car | 41 / 107 cm (54 / 107 with these people held out of the cam04 fit) |
+| pedestrians, set 2 | ditto, second recording | 33 / 73 cm |
 | other vehicles | the lidar's view of ordinary traffic, matched one-to-one, its track smoothed | 93 / 171 cm |
 | buses and trucks | the same, the long vehicles on their own | 84 / 184 cm |
 
-The car that can be checked most precisely sits at 19–59 cm. Ordinary traffic, which the pipeline
+The car that can be checked most precisely sits at 19–53 cm. Ordinary traffic, which the pipeline
 was never tuned on and whose real size it has to assume, sits near a metre. That gap is a position
 error rather than a heading or size error: once a vehicle is moving, its heading agrees with its own
 direction of travel to about a degree.
@@ -274,7 +276,7 @@ the command line.
 
 **The "pedestrian" figure includes cyclists.** The code splits road users in two: cars, motorcycles,
 buses and lorries on one figure, everything else on the other. A cyclist is detected as a bicycle and
-so lands with the pedestrians. Over the 71 minutes that is 68 bicycles among 2,517 pedestrians.
+so lands with the pedestrians. Over the 71 minutes that is 68 bicycles among 2,552 pedestrians.
 
 **Parking is not traffic.** A car standing in a bay is still detected every frame, and its solved
 centre drifts a metre or two as the cameras see more or less of it. Drawn, it looks like a vehicle
