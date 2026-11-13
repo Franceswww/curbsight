@@ -1,7 +1,8 @@
 """
 safety.py - near-misses from the trajectories: time-to-collision, post-encroachment time, heat maps.
 
-    python safety.py --tracks ../out/tracks.csv --out ../out/safety [--ttc 1.5] [--pet 1.5]
+    python safety.py --tracks ../out/tracks.csv --out ../out/safety
+                     [--ttc 1.5] [--pet veh-veh=1.5,veh-ped=1.0,veh-bike=1.5]
 
 Two surrogate safety measures, the ones the traffic-conflict literature has used for fifty years
 because they can be read off trajectories alone, without waiting for a crash:
@@ -22,9 +23,17 @@ because they can be read off trajectories alone, without waiting for a crash:
         than 30 degrees the paths crossed; where they agree it is one following the other, which
         is a headway, reported separately and not drawn as a near-miss.
 
-A near-miss is an encounter below the threshold, 1.5 s for both measures by default. Each one is
-written to near_misses.csv with its time, place, the two parties, their classes and speeds, and the
-value. The heat maps accumulate the near-misses on the aerial, one for TTC and one for PET.
+A near-miss is an encounter at or below the threshold for its pair of road users (THRESHOLDS
+below): TTC 1.5 s for every pair; PET 1.5 s between two vehicles, 1.0 s between a vehicle and a
+pedestrian, 1.5 s between a vehicle and a bicycle. The sources are listed in the README.
+
+The 5 s in this file (COLLECT_S) is not a threshold. It is the window inside which an encounter is
+recorded at all, so that near_misses.csv holds the whole distribution and a different threshold
+can be applied without running again.
+
+Each encounter is written to near_misses.csv with its time, place, the two parties, their classes
+and speeds, the value and the threshold that applied to it. The heat maps accumulate the
+near-misses on the aerial, one for TTC and one for PET.
 
 Read the top of the list before trusting the map. A fusion that has merged two road users into one
 object, or split one into two, produces a pair that was never two bodies in the same place, and the
@@ -48,6 +57,11 @@ KX, KY = 111320.0 * math.cos(math.radians(LAT0)), 111320.0
 VEHICLE = {"Passenger Vehicle", "Motorcycle", "Bus", "Truck"}
 SIZE = {"Passenger Vehicle": (4.5, 1.9), "Truck": (5.5, 2.1), "Bus": (10.5, 2.6), "Motorcycle": (2.0, 0.8)}
 RADIUS = {"Pedestrian": 0.4, "Bicycle": 0.6}                      # a disc for the party that is not a box
+
+# Near-miss thresholds in seconds, by pair of road users. Sources: README, "Thresholds and their sources".
+THRESHOLDS = {"TTC": {"veh-veh": 1.5, "veh-ped": 1.5, "veh-bike": 1.5},
+              "PET": {"veh-veh": 1.5, "veh-ped": 1.0, "veh-bike": 1.5}}
+COLLECT_S = 5.0                                                   # an encounter under this is recorded; not a threshold
 
 
 def kind(cls):
@@ -157,7 +171,7 @@ def on_road(field, e, n, min_vehicles=3):
     return f is not None and f[0] >= min_vehicles
 
 
-def ttc_events(objs, fps, field=None, near_m=20.0, collect_s=5.0, min_speed=1.0, approach_s=1.5, margin=0.8):
+def ttc_events(objs, fps, field=None, near_m=20.0, collect_s=COLLECT_S, min_speed=1.0, approach_s=1.5, margin=0.8):
     """encounters: (ttc_min, t, E, N, gA, gB, flag) for every pair whose TTC dipped below collect_s.
 
     ttc_min is the smallest POSITIVE value in the encounter. The flag says why an encounter is not
@@ -289,7 +303,7 @@ def footprint_cells(o, i, cell):
     return out
 
 
-def pet_events(objs, cell=1.0, collect_s=5.0, gap_s=0.5, min_speed=1.0):
+def pet_events(objs, cell=1.0, collect_s=COLLECT_S, gap_s=0.5, min_speed=1.0):
     """(pet, t_second_arrives, E, N, gA_first, gB_second, crossing, flag) for consecutive occupants
     of a cell. flag is "" for a conflict worth counting, otherwise why it is not one."""
     occ = defaultdict(list)                                          # cell -> [(t, g)]
@@ -406,6 +420,25 @@ def pair_key(p):
     return {"ped-veh": "veh-ped", "bike-veh": "veh-bike"}.get(p, p)
 
 
+def parse_thresholds(arg, default):
+    """'1.5' applies to every pair; 'veh-veh=1.5,veh-ped=1.0' changes only the pairs it names"""
+    thr = dict(default)
+    if arg is None:
+        return thr
+    try:
+        v = float(arg)
+        return {k: v for k in thr}
+    except ValueError:
+        pass
+    for kv in arg.split(","):
+        k, v = kv.split("=")
+        k = pair_key(k.strip())
+        if k not in thr:
+            raise SystemExit("unknown pair '%s': use veh-veh, veh-ped or veh-bike" % k)
+        thr[k] = float(v)
+    return thr
+
+
 def event_map(events, base, E0, N1, res, thr, label, out_path):
     """every near-miss as one marker on the dimmed aerial: colour = who met whom, size = how close the call was
     (a marker at the threshold is small, one at 0 s is large); the seconds are written beside each marker"""
@@ -510,8 +543,10 @@ def main():
     ap.add_argument("--tracks", required=True, help="tracks.csv from export_tracks.py")
     ap.add_argument("--out", required=True)
     ap.add_argument("--fps", type=float, default=15.0)
-    ap.add_argument("--ttc", type=float, default=1.5, help="s; a TTC at or below this is a near-miss")
-    ap.add_argument("--pet", type=float, default=1.5, help="s; a PET at or below this is a near-miss")
+    ap.add_argument("--ttc", default=None, help="s; a TTC at or below this is a near-miss. One number for every pair, or "
+                                                "veh-veh=..,veh-ped=..,veh-bike=..  Default: 1.5 for every pair")
+    ap.add_argument("--pet", default=None, help="s; a PET at or below this is a near-miss, same syntax. "
+                                                "Default: veh-veh=1.5,veh-ped=1.0,veh-bike=1.5")
     ap.add_argument("--min-speed", type=float, default=1.0, help="m/s; a vehicle slower than this cannot run into anyone")
     ap.add_argument("--margin", type=float, default=0.8, help="m; position error the TTC geometry must beat before a near-miss counts")
     ap.add_argument("--start", default=None, help="wall-clock time of t=0, HH:MM:SS, for the event list")
@@ -523,6 +558,9 @@ def main():
     if a.start:
         hh, mm, ss = (float(v) for v in a.start.split(":")); t0 = hh * 3600 + mm * 60 + ss
     clock = lambda t: ("%02d:%02d:%05.2f" % (int((t0 + t) // 3600), int((t0 + t) % 3600 // 60), (t0 + t) % 60)) if t0 is not None else ""
+    THR = {"TTC": parse_thresholds(a.ttc, THRESHOLDS["TTC"]), "PET": parse_thresholds(a.pet, THRESHOLDS["PET"])}
+    thr_of = lambda m, pair: THR[m].get(pair_key(pair), max(THR[m].values()))
+    top = {m: max(THR[m].values()) for m in THR}
 
     objs = load(a.tracks)
     print("%d objects loaded" % len(objs))
@@ -530,7 +568,7 @@ def main():
     if a.lane_field and os.path.exists(a.lane_field):
         j = json.load(open(a.lane_field))
         field = dict(cell=float(j["cell_m"]), cells={tuple(int(x) for x in k.split(",")): (v["vehicles"],) for k, v in j["cells"].items()})
-    ttc = ttc_events(objs, a.fps, field=field, min_speed=a.min_speed, approach_s=a.ttc, margin=a.margin)
+    ttc = ttc_events(objs, a.fps, field=field, min_speed=a.min_speed, approach_s=top["TTC"], margin=a.margin)
     pet = pet_events(objs, min_speed=a.min_speed)
     print("encounters: %d with TTC under 5 s, %d with PET under 5 s" % (len(ttc), len(pet)))
 
@@ -538,18 +576,20 @@ def main():
     for t_min, t, e, n, gA, gB, flag in ttc:
         A, B = objs[gA], objs[gB]
         iA = min(int(np.searchsorted(A["T"], t)), len(A["T"]) - 1); iB = min(int(np.searchsorted(B["T"], t)), len(B["T"]) - 1)
-        events.append(dict(measure="TTC", seconds=round(t_min, 2), near_miss=int(flag == "" and 0 < t_min <= a.ttc), flag=flag,
+        pr = "%s-%s" % (kind(A["cls"]), kind(B["cls"])); th = thr_of("TTC", pr)
+        events.append(dict(measure="TTC", seconds=round(t_min, 2), threshold=th, near_miss=int(flag == "" and 0 < t_min <= th), flag=flag,
                            t_sec=round(t, 2), time=clock(t),
                            E=round(e, 2), N=round(n, 2), lat=round(LAT0 + n / KY, 7), lon=round(LON0 + e / KX, 7),
-                           pair="%s-%s" % (kind(A["cls"]), kind(B["cls"])), gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
+                           pair=pr, gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
                            gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), crossing=""))
     for p, t, e, n, gA, gB, crossing, flag in pet:
         A, B = objs[gA], objs[gB]
         iA = min(int(np.searchsorted(A["T"], t)), len(A["T"]) - 1); iB = min(int(np.searchsorted(B["T"], t)), len(B["T"]) - 1)
-        events.append(dict(measure="PET", seconds=round(p, 2), near_miss=int(flag == "" and crossing and p <= a.pet), flag=flag,
+        pr = "%s-%s" % (kind(A["cls"]), kind(B["cls"])); th = thr_of("PET", pr)
+        events.append(dict(measure="PET", seconds=round(p, 2), threshold=th, near_miss=int(flag == "" and crossing and p <= th), flag=flag,
                            t_sec=round(t, 2), time=clock(t),
                            E=round(e, 2), N=round(n, 2), lat=round(LAT0 + n / KY, 7), lon=round(LON0 + e / KX, 7),
-                           pair="%s-%s" % (kind(A["cls"]), kind(B["cls"])), gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
+                           pair=pr, gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
                            gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), crossing=int(crossing)))
     events.sort(key=lambda d: (d["measure"], d["near_miss"] == 0, d["seconds"]))
     with open(os.path.join(a.out, "near_misses.csv"), "w", newline="", encoding="utf-8") as f:
@@ -558,26 +598,26 @@ def main():
     ext = json.load(open(os.path.join(CAL, "aerial_wide.json"))); E0, N1, RES = ext["E0"], ext["N1"], ext["res"]
     base = cv2.imread(os.path.join(CAL, "aerial_wide.png"))
     lines = []
-    for m, thr in (("TTC", a.ttc), ("PET", a.pet)):
+    for m in ("TTC", "PET"):
         nm = [d for d in events if d["measure"] == m and d["near_miss"]]
         by_pair = defaultdict(int)
-        for d in nm: by_pair[d["pair"]] += 1
-        lines.append("%s <= %.1f s: %d near-misses (%s)" % (m, thr, len(nm), ", ".join("%s %d" % kv for kv in sorted(by_pair.items()))))
-        heatmap([(d["E"], d["N"]) for d in nm], base, E0, N1, RES,
-                "%s near-misses, %s <= %.1f s: %d events" % ("vehicle-pedestrian and vehicle-vehicle", m, thr, len(nm)),
+        for d in nm: by_pair[pair_key(d["pair"])] += 1
+        parts = ", ".join("%s <= %.1f s: %d" % (PAIR_NAME[k], THR[m][k], by_pair.get(k, 0)) for k in ("veh-veh", "veh-ped", "veh-bike"))
+        lines.append("%s: %d near-misses (%s)" % (m, len(nm), parts))
+        heatmap([(d["E"], d["N"]) for d in nm], base, E0, N1, RES, "%s near-misses: %s" % (m, parts),
                 os.path.join(a.out, "nearmiss_%s.png" % m.lower()))
     nm_all = [d for d in events if d["near_miss"]]
-    event_map(nm_all, base, E0, N1, RES, max(a.ttc, a.pet),
-              "near-misses, TTC or PET at or under %.1f s: %d" % (max(a.ttc, a.pet), len(nm_all)), os.path.join(a.out, "nearmiss_events.png"))
-    distributions(events, a.ttc, a.pet, os.path.join(a.out, "nearmiss_distribution.png"))
+    event_map(nm_all, base, E0, N1, RES, max(top.values()),
+              "near-misses, TTC or PET at or under the threshold of the pair: %d" % len(nm_all), os.path.join(a.out, "nearmiss_events.png"))
+    distributions(events, top["TTC"], top["PET"], os.path.join(a.out, "nearmiss_distribution.png"))
     if over_time(events, clock, os.path.join(a.out, "nearmiss_over_time.png")):
         lines.append("near-misses over time: nearmiss_over_time.png")
-    follow = sum(1 for d in events if d["measure"] == "PET" and d["crossing"] == 0 and d["flag"] == "" and d["seconds"] <= a.pet)
-    lines.append("PET <= %.1f s between vehicles following in the same direction (headways, not drawn): %d" % (a.pet, follow))
+    follow = sum(1 for d in events if d["measure"] == "PET" and d["crossing"] == 0 and d["flag"] == "" and d["seconds"] <= d["threshold"])
+    lines.append("PET at or under the threshold between vehicles following in the same direction (headways, not drawn): %d" % follow)
     for m in ("TTC", "PET"):
         flags = defaultdict(int)
         for d in events:
-            if d["measure"] == m and d["flag"] and d["seconds"] <= (a.ttc if m == "TTC" else a.pet):
+            if d["measure"] == m and d["flag"] and d["seconds"] <= d["threshold"]:
                 flags[d["flag"]] += 1
         lines.append("%s under threshold but not counted: %s" % (m, ", ".join("%s %d" % kv for kv in sorted(flags.items())) or "none"))
     txt = "\n".join(lines); print(txt)

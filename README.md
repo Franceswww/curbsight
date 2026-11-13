@@ -13,7 +13,7 @@ were measured against a survey-grade GNSS track and a lidar, not estimated.
 pedestrian, one identity each, wherever they are. The whole two minutes are in
 [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 3,005 road users in 71 minutes
+## 93 road users in two minutes
 
 ![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
 
@@ -25,65 +25,56 @@ starts, arrow = where it ends.*
 *The same two minutes, pedestrians: 60 paths. Ninety-three road users in a hundred and twenty
 seconds, on a university campus at three in the afternoon.*
 
-Over a longer recording the shape of the place appears. These are the same scripts on 71 minutes
-from the same afternoon. That recording is not in the repository, only its figures:
+## Near-misses from time to collision and post-encroachment time
 
-![Vehicle paths over 71 minutes](figures/71min_vehicles.jpg)
+Two standard surrogate safety measures are computed from the same trajectories.
 
-*374 vehicle paths. The lanes, the turning movements and the bus stops draw themselves.*
+- **Time to collision (TTC).** At each frame, the time until a moving vehicle's body would reach
+  another road user if both kept their current velocity.
+- **Post-encroachment time (PET).** When two road users pass through the same square metre of
+  ground, the time between the first leaving it and the second arriving.
 
-![Pedestrian paths over 71 minutes](figures/71min_pedestrians.jpg)
+An encounter is a near-miss when its smallest value is at or under the threshold for that pair of
+road users.
 
-*2,202 pedestrian paths, drawn the same way. This is the point at which lines stop working.*
+### Thresholds and their sources
 
-![Pedestrian presence](figures/71min_density_pedestrians.jpg)
+| Pair | TTC | PET | Source |
+|---|---|---|---|
+| vehicle and vehicle | 1.5 s | 1.5 s | TTC: the default of the FHWA Surrogate Safety Assessment Model, SSAM [1]. PET: 1.5 s is given as a common threshold for conflicts of relatively high risk in [3], and is the "very dangerous" band of [4] |
+| vehicle and pedestrian | 1.5 s | 1.0 s | Ni et al. [5], as applied in [6]: conflict at TTC of 1.5 s or less, conflict at PET of 1.0 s or less, critical from 1.0 to 3.0 s |
+| vehicle and bicycle | 1.5 s | 1.5 s | Zangenehpour et al. [4]: PET of 1.5 s or less is a "very dangerous interaction". Counted at this threshold, the interactions at 23 intersections ranked the sites in agreement with their crash records (Spearman 0.64) |
 
-*So here is the same data as presence instead:
-how long each half-metre of ground was occupied. The footways, both crossings and the waiting areas
-at the corners come out, and so do the benches: the brightest half-metre in the picture collected
-45 minutes of the 71, because somebody sat there.*
+Two points about these values.
 
-![Vehicle presence](figures/71min_density_vehicles.jpg)
+- The vehicle and vehicle PET has no single agreed value. The Bellevue study [3] itself counts PET
+  under 2 s as a critical conflict, chosen as slightly above the common 1.5 s. This repository uses
+  1.5 s.
+- **The 5 s in the code is a recording window, not a threshold.** `safety.py` writes every
+  encounter whose TTC or PET falls under 5 s to `near_misses.csv` and then applies the thresholds
+  in the table. Five seconds is the upper limit of an interaction in the same sources: it is the
+  default maximum PET of SSAM [2], the value above which [4] counts "no interaction", and the upper
+  edge of the "potential conflicts" band in [3]. No pair uses 5 s as its near-miss threshold.
 
-*The same for vehicles. The bright patches are where traffic waits: the stop line, the bus stop, the
-queue at the lights.*
+The thresholds are set in `THRESHOLDS` at the top of `pipeline/safety.py` and can be changed on the
+command line.
 
-## 52 near-misses in 71 minutes, at the bus stop and the south-east corner
+### Near-misses over 71 minutes
 
-Two standard surrogate-safety measures are read off the same trajectories. **Time to collision**
-(TTC): at each frame, how long until a moving vehicle's body would reach another road user if both
-kept their current velocity. **Post-encroachment time** (PET): when two road users pass through the
-same square metre of ground, the time between the first leaving it and the second arriving. A
-near-miss is an encounter whose smallest value is at or under 1.5 s.
+The two maps below come from 71 minutes of the same afternoon, processed with the same scripts.
+That recording is not in the repository.
 
-![Near-misses by post-encroachment time](figures/71min_nearmiss_pet.jpg)
+![Near-misses by post-encroachment time, heat map](figures/nearmiss_pet_heatmap.jpg)
 
-*The 71 minutes, PET at or under 1.5 s: 52 near-misses, 19 between two vehicles, 24 between a
-vehicle and a pedestrian, 9 between a vehicle and a bicycle. The hottest ground is the south-east
-corner, where the crossing meets the stop line; the string along the north-west arm is the bus stop,
-vehicles passing a bus as it pulls out. Vehicles following one another in the same direction under
-1.5 s (29 of them) are headways, not conflicts, and are left off the map.*
+*PET: 43 near-misses. Vehicle and vehicle 19, vehicle and pedestrian 15, vehicle and bicycle 9.
+They concentrate at the south-east crosswalk and along the bus stop on the north-west arm. Each
+white ring is one event. Vehicles following one another in the same direction at or under the
+threshold (29 of them) are headways, not conflicts, and are not drawn.*
 
-TTC at or under 1.5 s gives four near-misses in the same 71 minutes, three of them a car arriving
-behind a car waiting at the stop line on the east arm, one a car passing a pedestrian at 37 km/h
-near the middle of the junction.
+![Near-misses by time to collision, heat map](figures/nearmiss_ttc_heatmap.jpg)
 
-![Every near-miss, by who met whom and how close](figures/71min_nearmiss_events.jpg)
-
-*The same 57 events as markers. Yellow = a vehicle and a pedestrian, blue = two vehicles, green = a
-vehicle and a bicycle; the larger the marker, the closer the call, and the number beside it is the
-seconds. The vehicle-to-vehicle events line up along the bus stop; the pedestrians gather at the
-south-east corner.*
-
-![How close the encounters came](figures/71min_nearmiss_distribution.jpg)
-
-*Every encounter under 5 s by its smallest TTC (top) and PET (bottom). The red line is the 1.5 s
-threshold; the grey bars are encounters set aside for the reasons below. Nearly everything at a TTC
-of zero is grey: two measured bodies touching is position error, not a collision.*
-
-![Near-misses over the afternoon](figures/71min_nearmiss_over_time.jpg)
-
-*Near-misses per five minutes, TTC in red and PET in blue.*
+*TTC: 4 near-misses. Three are a car arriving behind a car waiting at the stop line on the east
+arm. One is a car passing a pedestrian at 37 km/h near the middle of the junction.*
 
 Not every small number is a near-miss. Positions carry about a metre of error, so an encounter is
 set aside when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the
@@ -98,6 +89,35 @@ checked against the footage: a pickup passing a bus as it pulls out of the far s
 car pulling away from the stop line 0.27 s behind a bus crossing in front of it, and a left turn
 across the pickup's path (1.47 s). Five pedestrian encounters with that bus were set aside: the
 "pedestrians" were the faces printed on its advertisement.
+
+### References
+
+1. Gettman, D., Pu, L., Sayed, T., and Shelby, S. (2008). *Surrogate Safety Assessment Model and
+   Validation: Final Report.* Report FHWA-HRT-08-051, Federal Highway Administration. "SSAM
+   utilizes a default TTC value of 1.5 seconds, as suggested in previous research."
+   <https://www.fhwa.dot.gov/publications/research/safety/08051/02.cfm>
+2. Sabra, Z. A., Gettman, D., Henry, R. D., and Nallamothu, V. (2010). *Balancing Safety and
+   Capacity in an Adaptive Signal Control System, Phase 1.* Report FHWA-HRT-10-038, Federal Highway
+   Administration. "The 1.5-s TTC threshold and 5.0-s PET threshold are defaults in the SSAM
+   software." <https://www.fhwa.dot.gov/publications/research/safety/10038/003.cfm>
+3. Samara, L., St-Aubin, P., Loewenherz, F., Budnick, N., and Miranda-Moreno, L. (2020).
+   *Video-based Network-wide Surrogate Safety Analysis to Support a Proactive Network Screening
+   Using Connected Cameras: Case Study in the City of Bellevue (WA) United States.* Paper accepted
+   for the Transportation Research Board Annual Meeting, 2021. Bands: critical conflict PET under
+   2 s, minor 2 to 3 s, potential 3 to 5 s, interaction 5 to 10 s.
+   <https://bellevuewa.gov/sites/default/files/media/pdf_document/2020/TRB-Accepted-Paper-2021-Video-Surrogate-Safety-Analysis-Bellevue.pdf>
+4. Zangenehpour, S., Strauss, J., Miranda-Moreno, L. F., and Saunier, N. (2016). Are signalized
+   intersections with cycle tracks safer? A case-control study based on automated surrogate safety
+   analysis using video data. *Accident Analysis & Prevention*, 86, 161-172.
+   <https://doi.org/10.1016/j.aap.2015.10.025>. Bands: very dangerous PET of 1.5 s or less,
+   dangerous 1.5 to 3 s, mild 3 to 5 s, no interaction above 5 s.
+5. Ni, Y., Wang, M., Sun, J., and Li, K. (2016). Evaluation of pedestrian safety at intersections:
+   A theoretical framework based on pedestrian-vehicle interaction patterns. *Accident Analysis &
+   Prevention*, 96, 118-129. <https://doi.org/10.1016/j.aap.2016.07.030>
+6. Gagliardi, V., Ferrante, C., and Bella, F. (2024). Safety assessment of pedestrian-vehicle
+   interaction at signalized intersections: An observational study. *Journal of Transportation
+   Safety & Security.* <https://doi.org/10.1080/19439962.2023.2300280>. States the thresholds of
+   [5] used in the table above.
 
 ## Five steps from pixel to metre
 
@@ -242,7 +262,7 @@ recording:
 python build_lane_field.py --tracks ../out/tracks.csv --out ../calibration/lane_field_sanford_cedar.json
 ```
 
-Over a long recording the lines overlap into a tangle, and presence reads better than paths:
+Over a long recording the paths overlap, and a presence map is easier to read:
 
 ```bash
 python density.py --tracks ../out/tracks.csv --out ../out/density_pedestrians.png
@@ -257,7 +277,8 @@ python safety.py --tracks ../out/tracks.csv --out ../out/safety --start 15:02:07
 
 which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the two parties,
 the time, the place and why it was or was not counted), `safety_summary.txt`, and the two heat maps.
-`--ttc` and `--pet` set the thresholds; both default to 1.5 s.
+`--ttc` and `--pet` set the thresholds, either one number for every pair or one per pair
+(`--pet veh-veh=1.5,veh-ped=1.0,veh-bike=1.5`). The defaults are the values in the table above.
 
 ## Four folders
 
