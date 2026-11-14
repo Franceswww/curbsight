@@ -7,3 +7,7 @@ __pycache__/
 
 # model weights download themselves on first use
 *.pt
+
+# camera recordings are not published (privacy)
+sample/*.mp4
+sample/*.mkv

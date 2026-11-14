@@ -3,6 +3,10 @@ render_fused.py - the four camera views and the fused objects on the aerial phot
 
     python render_fused.py --clipdir <dir with camNN_*.mp4, camNN/trajectories.csv, fused.csv>
 
+Privacy: in the camera views every detected road user is replaced by coarse blocks (--no-blur shows
+the recorded pixels). Without the camNN_*.mp4 files the views are drawn on the still frame of
+calibration/frames/, so the map and the outlines can be rendered from the trajectories alone.
+
 Same drawing rules as render_demo.py (parked vehicles hidden, heading from the track, box pushed
 half a width away from the camera that saw it, bus 10.5 m), but one mark per fused object.
 Outputs <clipdir>/fused_demo/demo.mp4 and still_*.png
@@ -21,6 +25,40 @@ import export_tracks as ET
 import render_demo as RD
 
 RES = F.RES
+BLUR_BLOCK = 8          # side of a mosaic block, pixels of the camera tile (about 30 px of a 1920 px frame)
+BLUR_GROW = 5           # the covered area reaches this far beyond the detected outline, tile pixels
+BLUR_SPAN = (-4, -2, 0, 2, 4)   # a detection also covers the same place two processed frames before and after
+PEOPLE = ("Pedestrian", "Bicycle", "Motorcycle")
+
+
+def pixelate(im, dets, k):
+    """Privacy. Every detected road user is replaced by coarse blocks: a person, a rider and their
+    machine by the whole box, a vehicle by its outline. dets are the detections of this frame and of
+    its neighbours (BLUR_SPAN), so an object the detector misses for a frame stays covered."""
+    if not dets:
+        return im
+    m = np.zeros(im.shape[:2], np.uint8)
+    for d in dets:
+        if "poly" in d:
+            cv2.fillPoly(m, [(d["poly"] * k).astype(np.int32)], 255)
+        if "box" in d and ("poly" not in d or d["cls"] in PEOPLE):
+            x1, y1, x2, y2 = [int(round(v * k)) for v in d["box"]]
+            cv2.rectangle(m, (x1, y1), (x2, y2), 255, -1)
+    m = cv2.dilate(m, np.ones((2 * BLUR_GROW + 1, 2 * BLUR_GROW + 1), np.uint8))
+    h, w = im.shape[:2]
+    small = cv2.resize(im, (max(w // BLUR_BLOCK, 1), max(h // BLUR_BLOCK, 1)), interpolation=cv2.INTER_AREA)
+    mosaic = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+    im = im.copy(); im[m > 0] = mosaic[m > 0]
+    return im
+
+
+def track_fps(path):
+    """frame rate of a clip from its trajectories.csv (frame number over time), for when the video is not there"""
+    last = None
+    with open(path, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            last = r
+    return round(int(last["frame"]) / float(last["time_sec"]), 2) if last and float(last["time_sec"]) > 0 else 15.0
 
 
 def main():
@@ -44,6 +82,9 @@ def main():
     ap.add_argument("--lot-file", default=None, help="a parking area drawn by hand (see "
                     "lot_sanford_cedar.json): bays and a dead end where nothing is of interest, and "
                     "the aisle between them, where a vehicle is traffic while it is moving")
+    ap.add_argument("--no-blur", action="store_true",
+                    help="show the recorded pixels of the road users in the camera views; by default "
+                         "every detected person and vehicle is replaced by coarse blocks")
     a = ap.parse_args()
     truth = None
     if a.truth:
@@ -59,8 +100,20 @@ def main():
     out = os.path.join(a.clipdir, "fused_demo"); os.makedirs(out, exist_ok=True)
     cam_names = a.cams.split(","); cams = {c: RD.Cam(c, c + a.fit_suffix) for c in cam_names}
     tracks = {c: RD.load_tracks(os.path.join(a.clipdir, c, "trajectories.csv")) for c in cams}
-    caps = {c: cv2.VideoCapture([os.path.join(a.clipdir, f) for f in os.listdir(a.clipdir) if f.startswith(c) and f.endswith(".mp4")][0]) for c in cams}
-    fps = caps[cam_names[0]].get(cv2.CAP_PROP_FPS); fps_out = a.fps_out or fps / 2
+    caps = {}; still = {}
+    for c in cams:
+        vids = [os.path.join(a.clipdir, f) for f in os.listdir(a.clipdir) if f.startswith(c) and f.endswith(".mp4")]
+        caps[c] = cv2.VideoCapture(vids[0]) if vids else None
+        if caps[c] is None:
+            # no recording (the public sample ships none): the view is the still calibration frame
+            # with the detected outlines moving over it
+            fr_ = cv2.imread(os.path.join(RD.OUTR, "frames", c + ".jpg"))
+            still[c] = fr_ if fr_ is not None else np.full((1080, 1920, 3), 40, np.uint8)
+    if still:
+        print("no camera video for", ", ".join(still), "in", a.clipdir, "- those views show the outlines on the still calibration frame")
+    c0 = cam_names[0]
+    fps = caps[c0].get(cv2.CAP_PROP_FPS) if caps[c0] is not None else track_fps(os.path.join(a.clipdir, c0, "trajectories.csv"))
+    fps_out = a.fps_out or fps / 2
     fused = defaultdict(list); hist = defaultdict(list); push = {}; gid_of = {}; centred = False; hdg_csv = {}; clamped = 0
     # rows are grouped per object first: the centre-or-foot decision is made along a whole track with
     # hysteresis (export_tracks.centre_or_foot), not row by row, so the map and the figures agree
@@ -256,10 +309,15 @@ def main():
     for fr in frames:
         tops = []; fmap = {d["gid"]: d for d in fused[fr]}            # this frame's objects, for the view labels
         for c in cam_names:
-            caps[c].set(cv2.CAP_PROP_POS_FRAMES, fr - 1); ok, im = caps[c].read()
-            if not ok: im = np.zeros((2160, 3840, 3), np.uint8)
+            if caps[c] is not None:
+                caps[c].set(cv2.CAP_PROP_POS_FRAMES, fr - 1); ok, im = caps[c].read()
+                if not ok: im = np.zeros((2160, 3840, 3), np.uint8)
+            else:
+                im = still[c]
             im_w = im.shape[1]
             im = cv2.resize(im, (tw, th_)); k = tw / im_w
+            if caps[c] is not None and not a.no_blur:
+                im = pixelate(im, [d for df in BLUR_SPAN for d in tracks[c].get(fr + df, [])], k)
             for d in tracks[c].get(fr, []):                                # boxes drawn after the resize so lines stay crisp
                 g = gid_of.get((c, d["id"])); fo = fmap.get(g) if g is not None else None
                 if g is not None and hidden(g, fr): continue                 # dropped on the map, so dropped here too

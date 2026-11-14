@@ -4,14 +4,15 @@ Roadside cameras to one map. Several cameras on one pole watch an intersection; 
 see into one set of trajectories on the ground, in metres, with each road user carrying a single
 identity across every view.
 
-Everything here runs on the two minutes of real footage in `sample/`, and the accuracy figures below
-were measured against a survey-grade GNSS track and a lidar, not estimated.
+Everything here runs on a two-minute sample from three cameras, whose detections and trajectories are
+in `sample/`. The recordings themselves are not published (see [Privacy](#privacy)). The accuracy
+figures below were measured against a survey-grade GNSS track and a lidar, not estimated.
 
 ![Three camera views and the fused map, in motion](figures/demo.gif)
 
 *Thirteen seconds of it. Three camera views along the top, one map below. The same bus, the same
-pedestrian, one identity each, wherever they are. The whole two minutes are in
-[`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
+pedestrian, one identity each, wherever they are. Every detected person and vehicle is pixelated in
+the camera views. The whole two minutes are in [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
 ## 93 road users in two minutes
 
@@ -233,13 +234,16 @@ python render_fused.py --clipdir ../sample --cams cam02_1019,cam03_1019,cam04_10
     --start 15:02:07 --date 2026-10-19 --lot-file ../calibration/lot_sanford_cedar.json
 ```
 
-To redo the detection and tracking as well, which takes a few minutes per view on a GPU and considerably
-longer on a CPU, run step 3 first. The weights download themselves on first use:
+The recordings are not in the repository, so `render_fused.py` draws each camera view on the still
+frame in `calibration/frames/`, with the detected outlines moving over it. Given the clips beside the
+trajectories (`<clipdir>/cam02_1019.mp4` and so on) it shows the video instead, with every detected
+person and vehicle pixelated; `--no-blur` turns that off.
+
+Detection and tracking, step 3, needs a recording, so it runs on your own. It takes a few minutes per
+view on a GPU and considerably longer on a CPU, and the weights download themselves on first use:
 
 ```bash
-python track_clip_seg.py --video ../sample/cam02_1019.mp4 --out ../sample/cam02_1019
-python track_clip_seg.py --video ../sample/cam03_1019.mp4 --out ../sample/cam03_1019
-python track_clip_seg.py --video ../sample/cam04_1019.mp4 --out ../sample/cam04_1019
+python track_clip_seg.py --video /path/to/cam02_1019.mp4 --out ../sample/cam02_1019
 ```
 
 To get the trajectories as data rather than as a video:
@@ -286,12 +290,20 @@ the time, the place and why it was or was not counted), `safety_summary.txt`, an
 |---|---|
 | `pipeline/` | the five steps, plus the export, the renderer, the presence maps and the near-miss analysis |
 | `calibration/` | the solved camera models, the clicked control points, the base map, the ground surface, the lane network |
-| `sample/` | two minutes, three cameras, 2026-10-19 15:02:07, with step 3 already done |
-| `figures/` | the pictures above, and the sample as video |
+| `sample/` | two minutes, three cameras, 2026-10-19 15:02:07: the output of step 3 for each camera and the fused result, no video |
+| `figures/` | the pictures above, and the fused sample as video |
 
 A camera's solved model lives in `calibration/<camera>_fit_pnp/cam.json`. `_fit_pnp` is the default
 value of `--fit-suffix`, so several solutions for one camera can sit side by side and be chosen on
 the command line.
+
+## Privacy
+
+The camera recordings are not published. What is published is derived from them: for each detected
+road user its class, its position in pixels and in metres, and the outline of its mask, with no image
+content. Wherever a camera view appears in this repository, in the demo and its still frame, in
+`calibration/frames/` and in the control-point pictures, every detected person and vehicle has been
+pixelated. `render_fused.py` does the same by default to any recording it is given.
 
 ## Known limits
 
