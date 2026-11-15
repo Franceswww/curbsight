@@ -237,13 +237,16 @@ python render_fused.py --clipdir ../sample --cams cam02_1019,cam03_1019,cam04_10
 The recordings are not in the repository, so `render_fused.py` draws each camera view on the still
 frame in `calibration/frames/`, with the detected outlines moving over it. Given the clips beside the
 trajectories (`<clipdir>/cam02_1019.mp4` and so on) it shows the video instead, with every detected
-person and vehicle pixelated; `--no-blur` turns that off.
+person and vehicle pixelated; `--no-blur` turns that off. A tracker loses a road user now and then,
+so run `blur_boxes.py` on a recording before rendering it: it keeps every detection of every frame,
+tracked or not, and the renderer covers those as well.
 
 Detection and tracking, step 3, needs a recording, so it runs on your own. It takes a few minutes per
 view on a GPU and considerably longer on a CPU, and the weights download themselves on first use:
 
 ```bash
 python track_clip_seg.py --video /path/to/cam02_1019.mp4 --out ../sample/cam02_1019
+python blur_boxes.py --video /path/to/cam02_1019.mp4 --out ../sample/cam02_1019    # for the pixelation only
 ```
 
 To get the trajectories as data rather than as a video:
@@ -301,9 +304,21 @@ the command line.
 
 The camera recordings are not published. What is published is derived from them: for each detected
 road user its class, its position in pixels and in metres, and the outline of its mask, with no image
-content. Wherever a camera view appears in this repository, in the demo and its still frame, in
-`calibration/frames/` and in the control-point pictures, every detected person and vehicle has been
-pixelated. `render_fused.py` does the same by default to any recording it is given.
+content.
+
+Wherever a camera view appears in this repository, people and vehicles are pixelated. In the demo and
+in the frame above the blocks cover every road user the tracker follows and, because a tracker loses
+one now and then, every detection of a separate pass over each frame by three detection models
+(`blur_boxes.py`), plus a few fixed places covered by hand. Three further models that took no part in
+it were run over 180 frames as a check: of the 2,217 people and vehicles they found, all but six were
+covered in full, and none of the six is a visible road user (three buses covered to 86 % or more, a
+tree trunk taken for a person twice, one detection ten pixels across). The camera views are shown at
+a fifth of the recorded width or less. In the still frames of `calibration/frames/` and in the
+control-point pictures everything a detector finds at three image sizes is pixelated, and four places
+it does not find were covered by hand.
+
+`render_fused.py` pixelates by default any recording it is given: the tracked road users always, and
+every detection of `blur_boxes.py` when its output is beside the trajectories.
 
 ## Known limits
 

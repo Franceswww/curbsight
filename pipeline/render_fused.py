@@ -4,8 +4,10 @@ render_fused.py - the four camera views and the fused objects on the aerial phot
     python render_fused.py --clipdir <dir with camNN_*.mp4, camNN/trajectories.csv, fused.csv>
 
 Privacy: in the camera views every detected road user is replaced by coarse blocks (--no-blur shows
-the recorded pixels). Without the camNN_*.mp4 files the views are drawn on the still frame of
-calibration/frames/, so the map and the outlines can be rendered from the trajectories alone.
+the recorded pixels). The tracker loses a road user now and then, so the blocks also cover every
+detection of a separate pass over each frame when camNN/blur_boxes.csv is there (blur_boxes.py writes
+it). Without the camNN_*.mp4 files the views are drawn on the still frame of calibration/frames/, so
+the map and the outlines can be rendered from the trajectories alone.
 
 Same drawing rules as render_demo.py (parked vehicles hidden, heading from the track, box pushed
 half a width away from the camera that saw it, bus 10.5 m), but one mark per fused object.
@@ -29,13 +31,26 @@ BLUR_BLOCK = 8          # side of a mosaic block, pixels of the camera tile (abo
 BLUR_GROW = 5           # the covered area reaches this far beyond the detected outline, tile pixels
 BLUR_SPAN = (-4, -2, 0, 2, 4)   # a detection also covers the same place two processed frames before and after
 PEOPLE = ("Pedestrian", "Bicycle", "Motorcycle")
+PEOPLE_BOX = ("person", "bicycle", "motorcycle")     # the class names of blur_boxes.csv
 
 
-def pixelate(im, dets, k):
+def load_blur_boxes(path):
+    """frame -> [(class, box)] of blur_boxes.csv: every detection of a pass that does no tracking"""
+    B = defaultdict(list)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                B[int(r["frame"])].append((r["cls"], (float(r["x1"]), float(r["y1"]), float(r["x2"]), float(r["y2"]))))
+    return B
+
+
+def pixelate(im, dets, k, extra=()):
     """Privacy. Every detected road user is replaced by coarse blocks: a person, a rider and their
     machine by the whole box, a vehicle by its outline. dets are the detections of this frame and of
-    its neighbours (BLUR_SPAN), so an object the detector misses for a frame stays covered."""
-    if not dets:
+    its neighbours (BLUR_SPAN), so an object the detector misses for a frame stays covered. extra are
+    the boxes of the separate detection pass over the same frames: a person's box is always covered,
+    a vehicle's box unless the tracked outlines already cover 85 % of it."""
+    if not dets and not extra:
         return im
     m = np.zeros(im.shape[:2], np.uint8)
     for d in dets:
@@ -45,6 +60,12 @@ def pixelate(im, dets, k):
             x1, y1, x2, y2 = [int(round(v * k)) for v in d["box"]]
             cv2.rectangle(m, (x1, y1), (x2, y2), 255, -1)
     m = cv2.dilate(m, np.ones((2 * BLUR_GROW + 1, 2 * BLUR_GROW + 1), np.uint8))
+    for cls, (x1, y1, x2, y2) in extra:
+        x1, y1 = max(int(x1 * k) - BLUR_GROW, 0), max(int(y1 * k) - BLUR_GROW, 0)
+        x2, y2 = int(np.ceil(x2 * k)) + BLUR_GROW, int(np.ceil(y2 * k)) + BLUR_GROW
+        sub = m[y1:y2, x1:x2]
+        if sub.size and (cls in PEOPLE_BOX or (sub > 0).mean() < 0.85):
+            cv2.rectangle(m, (x1, y1), (x2, y2), 255, -1)
     h, w = im.shape[:2]
     small = cv2.resize(im, (max(w // BLUR_BLOCK, 1), max(h // BLUR_BLOCK, 1)), interpolation=cv2.INTER_AREA)
     mosaic = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -100,6 +121,7 @@ def main():
     out = os.path.join(a.clipdir, "fused_demo"); os.makedirs(out, exist_ok=True)
     cam_names = a.cams.split(","); cams = {c: RD.Cam(c, c + a.fit_suffix) for c in cam_names}
     tracks = {c: RD.load_tracks(os.path.join(a.clipdir, c, "trajectories.csv")) for c in cams}
+    blur_extra = {c: load_blur_boxes(os.path.join(a.clipdir, c, "blur_boxes.csv")) for c in cams}
     caps = {}; still = {}
     for c in cams:
         vids = [os.path.join(a.clipdir, f) for f in os.listdir(a.clipdir) if f.startswith(c) and f.endswith(".mp4")]
@@ -317,7 +339,8 @@ def main():
             im_w = im.shape[1]
             im = cv2.resize(im, (tw, th_)); k = tw / im_w
             if caps[c] is not None and not a.no_blur:
-                im = pixelate(im, [d for df in BLUR_SPAN for d in tracks[c].get(fr + df, [])], k)
+                im = pixelate(im, [d for df in BLUR_SPAN for d in tracks[c].get(fr + df, [])], k,
+                              [b for df in BLUR_SPAN for b in blur_extra[c].get(fr + df, [])])
             for d in tracks[c].get(fr, []):                                # boxes drawn after the resize so lines stay crisp
                 g = gid_of.get((c, d["id"])); fo = fmap.get(g) if g is not None else None
                 if g is not None and hidden(g, fr): continue                 # dropped on the map, so dropped here too
