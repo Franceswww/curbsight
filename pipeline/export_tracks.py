@@ -23,7 +23,7 @@ hairpin). A standing vehicle is held at one position for the whole stop (hold_st
 at the light is a point on its line and not a scribble, and is not cut. Vehicles inside the painted
 bays of --lot-file are not traffic and are not drawn; the aisle is a road.
 
-People and bicycles pass two (person_runs): no step faster than the body can move (4 m/s, 10 for a
+People and bicycles pass two (person_runs): no step faster than the body can move (4 m/s, 12.5 for a
 bicycle) and no position beyond what the cameras can see (55 m from the pole).
 
 What fails a test is left out and the path breaks there; stretches too short to mean anything are
@@ -52,13 +52,16 @@ PALETTE = [(60, 76, 231), (74, 195, 139), (219, 152, 52), (182, 89, 155), (60, 1
            (18, 156, 243), (133, 160, 22), (80, 62, 44), (90, 33, 41), (125, 185, 222)]
 
 
-MIN_RADIUS = {"Passenger Vehicle": 4.5, "Truck": 6.0, "Bus": 9.0, "Motorcycle": 2.5}   # m, generous
+# m, generous. A bus was 9.0 until a 12 m bus turning left under the pole was measured at about 7 m (its centre,
+# through 88 degrees in 10.7 m) and lost 5.6 s of its path to the rule. At 7.0 the 71 minutes gain that one turn
+# and nothing else.
+MIN_RADIUS = {"Passenger Vehicle": 4.5, "Truck": 6.0, "Bus": 7.0, "Motorcycle": 2.5}
 
 
 def load_lane_field(path):
     """build_lane_field.py's output: per 2 m cell, how many vehicles used it and which way they went"""
     j = json.load(open(path))
-    cells = {tuple(int(x) for x in k.split(",")): (v["vehicles"], v["concentration"], math.radians(v["lane_deg"]))
+    cells = {tuple(int(x) for x in k.split(",")): (v["vehicles"], v["concentration"], math.radians(v["lane_deg"]), v.get("sector_vehicles"))
              for k, v in j["cells"].items()}
     return dict(cell=float(j["cell_m"]), cells=cells)
 
@@ -81,12 +84,22 @@ def on_lane(field, p_prev, p, min_vehicles=3, min_conc=0.7, max_dev_deg=45.0):
     # goes costs more than the last few metres of coverage, so the far end is the price.
     if f is None or f[0] < min_vehicles:
         return False
-    nveh, conc, lane = f
+    nveh, conc, lane, sectors = f
     step = (p[0] - p_prev[0], p[1] - p_prev[1])
     if math.hypot(*step) < 0.3 or conc < min_conc:
         return True
-    dev = abs((math.atan2(step[1], step[0]) - lane + math.pi / 2) % math.pi - math.pi / 2)
-    return dev <= math.radians(max_dev_deg)
+    th = math.atan2(step[1], step[0])
+    dev = abs((th - lane + math.pi / 2) % math.pi - math.pi / 2)
+    if dev <= math.radians(max_dev_deg):
+        return True
+    # Across the cell's main direction, but is it across the traffic? A junction cell carries a second flow
+    # (a bus route crossing a car lane): the step is fine if min_vehicles distinct vehicles went this way here,
+    # counting the sector it falls in and its two neighbours.
+    if sectors:
+        k = len(sectors)
+        b = int((th % math.pi) / math.pi * k) % k
+        return sectors[(b - 1) % k] + sectors[b] + sectors[(b + 1) % k] >= min_vehicles
+    return False
 
 
 def curvature_ok(P, cls, standing=None, step_m=1.0):
@@ -107,6 +120,39 @@ def curvature_ok(P, cls, standing=None, step_m=1.0):
     """
     n = len(P)
     ok = np.ones(n, bool)
+    if standing is not None and standing.any() and not standing.all():
+        # Each moving stretch is judged on its own. A stand is held at one point (hold_standing), the median of
+        # where the centre sat, and the first moving row is wherever the centre happens to be when the vehicle
+        # pulls away: the segment from the held point to that row has no meaning as a direction, and measured
+        # against it a bus pulling out of its stop made a turn of over 90 degrees within 3 m. The whole pull-out
+        # was cut, and with it the pickup that passed 0.13 s behind the bus (a near-miss checked on the footage).
+        i = 0
+        while i < n:
+            if standing[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < n and not standing[j + 1]:
+                j += 1
+            seg = curvature_ok(P[i:j + 1], cls, None, step_m)
+            if not seg.all():
+                # what is left of a stretch that failed, if it is under 2 m of path, is the first or last step of the
+                # same impossible manoeuvre and not a piece of driving: one such row beside a stand drew a reversal
+                a_ = 0
+                while a_ < len(seg):
+                    if not seg[a_]:
+                        a_ += 1
+                        continue
+                    b_ = a_
+                    while b_ + 1 < len(seg) and seg[b_ + 1]:
+                        b_ += 1
+                    Q_ = P[i + a_:i + b_ + 1]
+                    if float(np.hypot(*np.diff(Q_, axis=0).T).sum()) < 2.0:
+                        seg[a_:b_ + 1] = False
+                    a_ = b_ + 1
+            ok[i:j + 1] = seg
+            i = j + 1
+        return ok
     idx = [0]
     for i in range(1, n):
         if np.hypot(*(P[i] - P[idx[-1]])) >= step_m:
@@ -216,7 +262,10 @@ def vehicle_runs(T, P, cls, field, min_s=2.0, min_m=5.0):
 HEAD_M, HEAD_HALFW_M = 0.8, 0.26                                  # arrow head, metres on the ground
 
 
-MAX_SPEED = {"Pedestrian": 4.0, "Bicycle": 10.0}      # m/s; a sprint is 3 and a fast cyclist 9
+# m/s; a sprint is 3. A bicycle was capped at 10 until two riders on electric bicycles crossed the junction at
+# 10.5 and 10.7 m/s: one lost its first second, the other was not drawn at all. 12.5 m/s is 28 mi/h, where the
+# motor of the fastest class of electric bicycle stops assisting.
+MAX_SPEED = {"Pedestrian": 4.0, "Bicycle": 12.5}
 CAMERA_REACH_M = 55.0                                    # detections stop at 45 m; past this is extrapolation
 
 
@@ -372,7 +421,7 @@ def main():
     ap.add_argument("--lot-file", default=None, help="a parking area drawn by hand (see "
                     "calibration/lot_sanford_cedar.json): vehicles in its bays are not traffic")
     ap.add_argument("--lane-field", default=os.path.join(OUTR, "lane_field_sanford_cedar.json"),
-                    help="build_lane_field.py output; vehicle positions off it are not drawn")
+                    help="build_lane_field.py output; vehicle positions off it are not drawn (none = no lane test, for the export a lane network is built from)")
     ap.add_argument("--min-s", type=float, default=3.0, help="paths shorter than this are drawn grey")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)

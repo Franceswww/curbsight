@@ -19,9 +19,11 @@ because they can be read off trajectories alone, without waiting for a crash:
   PET   post-encroachment time. Two road users used the same patch of ground; how many seconds
         passed between the first leaving it and the second arriving. The ground is cut into 1 m
         cells; a vehicle occupies every cell its body covers, a person the cell under their feet.
-        For each cell, consecutive occupants are paired. Where their directions differ by more
-        than 30 degrees the paths crossed; where they agree it is one following the other, which
-        is a headway, reported separately and not drawn as a near-miss.
+        For each cell, consecutive occupants are paired, and the pair is typed the way published
+        tools type an encounter (encounter_type.py): following, oncoming, merging or crossing.
+        PET is counted for merging and crossing only, as SUMO's safety device does. A follower in
+        the same lane is a matter for TTC, and two vehicles that pass in opposite lanes only touch
+        the same cell at the centre line.
 
 A near-miss is an encounter at or below the threshold for its pair of road users (THRESHOLDS
 below): TTC 1.5 s for every pair; PET 1.5 s between two vehicles, 1.0 s between a vehicle and a
@@ -49,6 +51,8 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
+import encounter_type
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAL = os.path.join(HERE, "..", "calibration")
 LAT0, LON0 = 33.94760, -83.37630
@@ -62,6 +66,9 @@ RADIUS = {"Pedestrian": 0.4, "Bicycle": 0.6}                      # a disc for t
 THRESHOLDS = {"TTC": {"veh-veh": 1.5, "veh-ped": 1.5, "veh-bike": 1.5},
               "PET": {"veh-veh": 1.5, "veh-ped": 1.0, "veh-bike": 1.5}}
 COLLECT_S = 5.0                                                   # an encounter under this is recorded; not a threshold
+
+
+COUNTED = ("crossing", "merging")                                # encounter types with a post-encroachment time
 
 
 def kind(cls):
@@ -504,7 +511,7 @@ def distributions(events, thr_ttc, thr_pet, out_path):
     edges = np.arange(0, 5.001, 0.25)
     panels = []
     for m, thr in (("TTC", thr_ttc), ("PET", thr_pet)):
-        ev = [d for d in events if d["measure"] == m and (m == "TTC" or d["crossing"] == 1)]
+        ev = [d for d in events if d["measure"] == m and (m == "TTC" or d["type"] in COUNTED)]
         kept = np.zeros(len(edges) - 1, int); aside = np.zeros(len(edges) - 1, int)
         for d in ev:
             b = min(int(d["seconds"] / 0.25), len(edges) - 2)
@@ -581,16 +588,17 @@ def main():
                            t_sec=round(t, 2), time=clock(t),
                            E=round(e, 2), N=round(n, 2), lat=round(LAT0 + n / KY, 7), lon=round(LON0 + e / KX, 7),
                            pair=pr, gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
-                           gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), crossing=""))
+                           gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), type=""))
     for p, t, e, n, gA, gB, crossing, flag in pet:
         A, B = objs[gA], objs[gB]
         iA = min(int(np.searchsorted(A["T"], t)), len(A["T"]) - 1); iB = min(int(np.searchsorted(B["T"], t)), len(B["T"]) - 1)
         pr = "%s-%s" % (kind(A["cls"]), kind(B["cls"])); th = thr_of("PET", pr)
-        events.append(dict(measure="PET", seconds=round(p, 2), threshold=th, near_miss=int(flag == "" and crossing and p <= th), flag=flag,
+        typ = encounter_type.encounter(objs, gA, gB, t, p, e, n)["type"]
+        events.append(dict(measure="PET", seconds=round(p, 2), threshold=th, near_miss=int(flag == "" and typ in COUNTED and p <= th), flag=flag,
                            t_sec=round(t, 2), time=clock(t),
                            E=round(e, 2), N=round(n, 2), lat=round(LAT0 + n / KY, 7), lon=round(LON0 + e / KX, 7),
                            pair=pr, gid_a=gA, cls_a=A["cls"], speed_a=round(float(A["speed"][iA]), 1),
-                           gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), crossing=int(crossing)))
+                           gid_b=gB, cls_b=B["cls"], speed_b=round(float(B["speed"][iB]), 1), type=typ))
     events.sort(key=lambda d: (d["measure"], d["near_miss"] == 0, d["seconds"]))
     with open(os.path.join(a.out, "near_misses.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(events[0])); w.writeheader(); w.writerows(events)
@@ -612,8 +620,15 @@ def main():
     distributions(events, top["TTC"], top["PET"], os.path.join(a.out, "nearmiss_distribution.png"))
     if over_time(events, clock, os.path.join(a.out, "nearmiss_over_time.png")):
         lines.append("near-misses over time: nearmiss_over_time.png")
-    follow = sum(1 for d in events if d["measure"] == "PET" and d["crossing"] == 0 and d["flag"] == "" and d["seconds"] <= d["threshold"])
-    lines.append("PET at or under the threshold between vehicles following in the same direction (headways, not drawn): %d" % follow)
+    enc = [d for d in events if d["measure"] == "PET" and d["flag"] == ""]
+    by_type = defaultdict(int)
+    for d in enc: by_type[d["type"]] += 1
+    lines.append("PET encounters under 5 s by type: crossing %d and merging %d (counted, %d); following %d (same lane, a matter for TTC) "
+                 "and oncoming %d (opposite lanes), not counted" % (by_type["crossing"], by_type["merging"], by_type["crossing"] + by_type["merging"],
+                                                                   by_type["following"], by_type["oncoming"]))
+    counted = [d for d in enc if d["type"] in COUNTED]
+    heatmap([(d["E"], d["N"]) for d in counted], base, E0, N1, RES, "PET encounters under 5 s on crossing or merging paths: %d" % len(counted),
+            os.path.join(a.out, "encounters_pet.png"))
     for m in ("TTC", "PET"):
         flags = defaultdict(int)
         for d in events:

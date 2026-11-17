@@ -136,7 +136,7 @@ def main():
     c0 = cam_names[0]
     fps = caps[c0].get(cv2.CAP_PROP_FPS) if caps[c0] is not None else track_fps(os.path.join(a.clipdir, c0, "trajectories.csv"))
     fps_out = a.fps_out or fps / 2
-    fused = defaultdict(list); hist = defaultdict(list); push = {}; gid_of = {}; centred = False; hdg_csv = {}; clamped = 0
+    fused = defaultdict(list); hist = defaultdict(list); push = {}; gid_of = {}; gid_at = {}; centred = False; hdg_csv = {}; clamped = 0
     # rows are grouped per object first: the centre-or-foot decision is made along a whole track with
     # hysteresis (export_tracks.centre_or_foot), not row by row, so the map and the figures agree
     by_gid = defaultdict(list)
@@ -180,7 +180,7 @@ def main():
             clamped += fell_back
             fused[fr].append(dict(gid=g, cls=r["cls"], e=e, n=n, cam=r["cam"], n_cams=int(r["n_cams"]))); hist[g].append((fr, e, n))
             for src in r.get("src", "").split("|"):                      # camera track -> global id, for the labels in the views
-                if ":" in src: cam_, tid_ = src.rsplit(":", 1); gid_of[(cam_, int(tid_))] = g
+                if ":" in src: cam_, tid_ = src.rsplit(":", 1); gid_of[(cam_, int(tid_))] = g; gid_at[(cam_, int(tid_), fr)] = g   # per frame too: one camera track can feed two objects in turn (a cut, a hand-over)
             push[(g, fr)] = (0.0, 0.0) if (centred and not fell_back) else (float(r.get("pe", 0)), float(r.get("pn", 0)))
             if r.get("hdg", "") != "": hdg_csv[(g, fr)] = np.radians(float(r["hdg"]))   # smoothed in fuse_tracks; used instead of re-estimating
     for g in hist: hist[g].sort()
@@ -342,7 +342,7 @@ def main():
                 im = pixelate(im, [d for df in BLUR_SPAN for d in tracks[c].get(fr + df, [])], k,
                               [b for df in BLUR_SPAN for b in blur_extra[c].get(fr + df, [])])
             for d in tracks[c].get(fr, []):                                # boxes drawn after the resize so lines stay crisp
-                g = gid_of.get((c, d["id"])); fo = fmap.get(g) if g is not None else None
+                g = gid_at.get((c, d["id"], fr), gid_of.get((c, d["id"]))); fo = fmap.get(g) if g is not None else None
                 if g is not None and hidden(g, fr): continue                 # dropped on the map, so dropped here too
                 g = (g, fo["n_cams"]) if fo else None                         # the view shows the GLOBAL class and this frame's camera count
                 col = RD.CLS_COL.get(fo["cls"], (200, 200, 200)) if fo else (110, 110, 110)

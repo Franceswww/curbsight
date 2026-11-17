@@ -14,16 +14,16 @@ figures below were measured against a survey-grade GNSS track and a lidar, not e
 pedestrian, one identity each, wherever they are. Every detected person and vehicle is pixelated in
 the camera views. The whole two minutes are in [`figures/fused_demo.mp4`](figures/fused_demo.mp4).*
 
-## 93 road users in two minutes
+## 83 road users in two minutes
 
 ![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
 
-*Every vehicle path in the sample that lasts at least 3 seconds: 19 of them. Dot = where the track
+*Every vehicle path in the sample that lasts at least 3 seconds: 17 of them. Dot = where the track
 starts, arrow = where it ends.*
 
 ![Pedestrian paths over two minutes](figures/2min_pedestrians.jpg)
 
-*The same two minutes, pedestrians: 60 paths. Ninety-three road users in a hundred and twenty
+*The same two minutes, pedestrians: 56 paths. Eighty-three road users in a hundred and twenty
 seconds, on a university campus at three in the afternoon.*
 
 ## Near-misses from time to collision and post-encroachment time
@@ -33,7 +33,22 @@ Two standard surrogate safety measures are computed from the same trajectories.
 - **Time to collision (TTC).** At each frame, the time until a moving vehicle's body would reach
   another road user if both kept their current velocity.
 - **Post-encroachment time (PET).** When two road users pass through the same square metre of
-  ground, the time between the first leaving it and the second arriving.
+  ground, the time between the first leaving it and the second arriving. It is counted only where
+  the two paths cross or merge.
+
+PET belongs to paths that meet. Each pair that passes through the same square metre within 5 s is
+therefore given a type first, the way published tools type an encounter (`pipeline/encounter_type.py`).
+SUMO's safety device [7] sorts encounters into lead and follow, merging and crossing by the lanes
+used before and after the conflict point, and computes no PET for lead and follow. FHWA's SSAM [8]
+calls a conflict rear end under 30 degrees and crossing over 80 degrees. The trajectories here carry
+no lane number, so the lane is read from the paths:
+
+| Type | Rule | PET |
+|---|---|---|
+| following | the second road user approached along the path the first one drove, within 3 m and 30 degrees, whatever the first one does afterwards | not counted, a matter for TTC |
+| oncoming | opposite directions, and the second one's path does not cross the first one's near the place in the next 10 s | not counted: the two bodies only reach the same square metre at the centre line |
+| merging | different paths before the place, the same lane after it | counted |
+| crossing | everything else: paths from different directions that cross and separate | counted |
 
 An encounter is a near-miss when its smallest value is at or under the threshold for that pair of
 road users.
@@ -67,15 +82,23 @@ That recording is not in the repository.
 
 ![Near-misses by post-encroachment time, heat map](figures/nearmiss_pet_heatmap.jpg)
 
-*PET: 43 near-misses. Vehicle and vehicle 19, vehicle and pedestrian 15, vehicle and bicycle 9.
-They concentrate at the south-east crosswalk and along the bus stop on the north-west arm. Each
-white ring is one event. Vehicles following one another in the same direction at or under the
-threshold (29 of them) are headways, not conflicts, and are not drawn.*
+*PET: 19 near-misses. Vehicle and vehicle 12, vehicle and pedestrian 6, vehicle and bicycle 1.
+They concentrate in the middle of the junction, with three along the bus stop on the north-west
+arm. Each white ring is one event. Nine of the twelve between vehicles are a left turn passing just
+behind an oncoming vehicle.*
+
+![Encounters with a post-encroachment time under 5 s, heat map](figures/encounters_pet_heatmap.jpg)
+
+*Every encounter with a PET under 5 s on crossing or merging paths: 159. Vehicle and pedestrian
+117, vehicle and vehicle 39, vehicle and bicycle 3. They gather around the crosswalks. Of the 414
+pairs that pass through the same square metre within 5 s, 246 are one road user following another
+in the same lane and 9 are vehicles passing in opposite lanes; neither has a PET.*
 
 ![Near-misses by time to collision, heat map](figures/nearmiss_ttc_heatmap.jpg)
 
-*TTC: 4 near-misses. Three are a car arriving behind a car waiting at the stop line on the east
-arm. One is a car passing a pedestrian at 37 km/h near the middle of the junction.*
+*TTC: 3 near-misses, all three a car turning out of the south arm past a car that waits at the
+stop line on the east arm. For a moment the turning car's straight course points at the waiting
+one: a measure that assumes constant velocity does that to anything that turns.*
 
 Not every small number is a near-miss. Positions carry about a metre of error, so an encounter is
 set aside when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the
@@ -85,11 +108,15 @@ not for its body shrunk by the position error; when the two tracks are one road 
 when the pedestrian is stepping on or off a bus; or when the vehicle is standing. Each row of
 `near_misses.csv` carries the reason, so every exclusion can be checked.
 
-On the two-minute sample the same thresholds give three near-misses, all between vehicles, each
-checked against the footage: a pickup passing a bus as it pulls out of the far stop (PET 0.13 s), a
-car pulling away from the stop line 0.27 s behind a bus crossing in front of it, and a left turn
-across the pickup's path (1.47 s). Five pedestrian encounters with that bus were set aside: the
-"pedestrians" were the faces printed on its advertisement.
+On the two-minute sample the same thresholds give two near-misses, both between vehicles and both
+checked against the footage: a car pulling away from the stop line 0.40 s behind a bus crossing in
+front of it, and a left turn across a pickup's path (1.47 s). A third that an earlier version
+counted, the pickup passing a bus as it pulls out of the far stop, is now set aside: the bus is
+placed by the camera that sees all of it, one to three metres further back, the two paths no longer
+cross the same square metre, and what is left is a time to collision of 1.41 s that lies within the
+position error. Nothing here can say which position of the bus is right. Six encounters between a
+bus and a "pedestrian" are set aside as well: the two pedestrians are what is left of the faces
+printed on two buses' advertisements, a handful of detections the tidying step did not catch.
 
 ### References
 
@@ -119,6 +146,12 @@ across the pickup's path (1.47 s). Five pedestrian encounters with that bus were
    interaction at signalized intersections: An observational study. *Journal of Transportation
    Safety & Security.* <https://doi.org/10.1080/19439962.2023.2300280>. States the thresholds of
    [5] used in the table above.
+7. Eclipse SUMO documentation, *SSM Device* (surrogate safety measures). Encounter types lead and
+   follow, merging and crossing; no PET is calculated for lead and follow situations.
+   <https://sumo.dlr.de/docs/Simulation/Output/SSM_Device.html>
+8. Federal Highway Administration, *Surrogate Safety Assessment Model 3* (source code). Conflict
+   type from the conflict angle, rear end under 30 degrees and crossing over 80 degrees by default;
+   TTC by projecting each vehicle along its own path. <https://github.com/etfomm/SSAM3>
 
 ## Five steps from pixel to metre
 
@@ -131,16 +164,30 @@ across the pickup's path (1.47 s). Five pedestrian encounters with that bus were
    ray is cast onto a real elevation surface built from airborne lidar.
 3. **Detect and track in each view.** YOLO26x-seg plus BoT-SORT, every second frame. The foot point
    comes from the segmentation mask, not from the bounding box, because the mask's lowest edge is
-   where the tyres meet the road.
+   where the tyres meet the road. Each frame goes through the detector twice, at 1920 and at 960
+   pixels: a bus a few metres from the pole is larger than anything the detector was trained on,
+   and at full size it comes back in pieces at low confidence and takes the confidence of its
+   neighbours down with it. The tracker has a second, wider match for riders who move further
+   between two frames than they are wide. Each camera's tracks are then tidied
+   (`stitch_tracks.py`): a detection whose foot is hidden by a nearer road user is marked, so that
+   its position is trusted less; a road user that reappears where it stood before a bus passed in
+   front of it gets its old number back, and so does a car that passes behind a signal pole; a
+   track that turns from a pedestrian into a car, or jumps onto another road user, is split there; and what a detector takes for a road user but is not one
+   is dropped: the people printed on a bus's advertising, the driver seen through a windscreen, a
+   bicycle on a car's rack.
 4. **Project to the ground.** Each detection becomes a position in metres on that elevation surface.
 5. **Merge the views.** One object per road user, however many cameras can see it. Positions are
-   combined by inverse-square range, so the nearest camera dominates.
+   combined by inverse-square range, so the nearest camera dominates. A camera that has the road
+   user partly hidden, or cut by the edge of its frame, is left out wherever another sees it whole.
+   A vehicle driving into a frame is a sliver at first: those boxes say which vehicle it is, which
+   is what the hand-over from the neighbouring camera needs, and its position is taken from the
+   first whole view on.
 
 ![Three cameras, one map](figures/fused_frame.jpg)
 
 *One frame, large enough to read. Orange = bus, blue = car, red = truck, yellow = pedestrian. A `*`
-after a label means two cameras were seeing that object at that moment. Bus 118 is in cam03 and in
-cam04, bus 114 in cam02 and cam03, and each appears on the map once.*
+after a label means two cameras were seeing that object at that moment. Bus 108 is in cam03 and in
+cam04, bus 104 in cam02 and cam03, and each appears on the map once.*
 
 Nothing in step 2 tells the solver how high the pole is or where it stands. It works that out from
 the clicked points alone, and the answer it returns, 5.4 m, 6.5 m and 6.7 m above the ground it
@@ -246,8 +293,12 @@ view on a GPU and considerably longer on a CPU, and the weights download themsel
 
 ```bash
 python track_clip_seg.py --video /path/to/cam02_1019.mp4 --out ../sample/cam02_1019
+python stitch_tracks.py --in ../sample/cam02_1019/trajectories.csv --out ../sample/cam02_1019/trajectories.csv
 python blur_boxes.py --video /path/to/cam02_1019.mp4 --out ../sample/cam02_1019    # for the pixelation only
 ```
+
+`stitch_tracks.py` needs no recording, only the tracks: it works from the mask outlines the tracker
+wrote. The tracks in `sample/` have been through it.
 
 To get the trajectories as data rather than as a video:
 
@@ -262,11 +313,14 @@ duration, path length, mean and top speed, and both endpoints, and the two traje
 
 A vehicle is drawn only where its position behaves like a vehicle: on the lane network, and
 turning no tighter than its body can. The lane network is learned from the traffic itself, one hour
-of it, and shipped as `calibration/lane_field_sanford_cedar.json`; to rebuild it from a longer
-recording:
+of it, and shipped as `calibration/lane_field_sanford_cedar.json`. A cell inside the junction
+carries more than one flow, so each cell keeps the number of vehicles seen going each way, and a
+vehicle is across the traffic only where hardly any vehicle ever went its way. To rebuild the
+network from a longer recording, export once without it and build from that:
 
 ```bash
-python build_lane_field.py --tracks ../out/tracks.csv --out ../calibration/lane_field_sanford_cedar.json
+python export_tracks.py --fused ../long/fused.csv --out ../long/out_nolanes --lane-field none
+python build_lane_field.py --tracks ../long/out_nolanes/tracks.csv --out ../calibration/lane_field_sanford_cedar.json
 ```
 
 Over a long recording the paths overlap, and a presence map is easier to read:
@@ -283,7 +337,8 @@ python safety.py --tracks ../out/tracks.csv --out ../out/safety --start 15:02:07
 ```
 
 which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the two parties,
-the time, the place and why it was or was not counted), `safety_summary.txt`, and the two heat maps.
+the time, the place, the encounter type and why it was or was not counted), `safety_summary.txt`,
+the two near-miss heat maps and the map of every counted PET encounter.
 `--ttc` and `--pet` set the thresholds, either one number for every pair or one per pair
 (`--pet veh-veh=1.5,veh-ped=1.0,veh-bike=1.5`). The defaults are the values in the table above.
 
@@ -310,9 +365,9 @@ Wherever a camera view appears in this repository, people and vehicles are pixel
 in the frame above the blocks cover every road user the tracker follows and, because a tracker loses
 one now and then, every detection of a separate pass over each frame by three detection models
 (`blur_boxes.py`), plus a few fixed places covered by hand. Three further models that took no part in
-it were run over 180 frames as a check: of the 2,217 people and vehicles they found, all but six were
-covered in full, and none of the six is a visible road user (three buses covered to 86 % or more, a
-tree trunk taken for a person twice, one detection ten pixels across). The camera views are shown at
+it were run over 180 frames as a check: of the 2,220 people and vehicles they found, all but six were
+covered in full, and none of the six is a visible road user (a lorry and two buses covered to 88 %
+or more, a tree trunk taken for a person twice, one detection seven pixels across). The camera views are shown at
 a fifth of the recorded width or less. In the still frames of `calibration/frames/` and in the
 control-point pictures everything a detector finds at three image sizes is pixelated, and four places
 it does not find were covered by hand.
@@ -324,7 +379,7 @@ every detection of `blur_boxes.py` when its output is beside the trajectories.
 
 **The "pedestrian" figure includes cyclists.** The code splits road users in two: cars, motorcycles,
 buses and lorries on one figure, everything else on the other. A cyclist is detected as a bicycle and
-so lands with the pedestrians. Over the 71 minutes that is 68 bicycles among 2,552 pedestrians.
+so lands with the pedestrians. Over the 71 minutes that is 47 bicycles beside 2,085 pedestrians.
 
 **Parking is not traffic.** A car standing in a bay is still detected every frame, and its solved
 centre drifts a metre or two as the cameras see more or less of it. Drawn, it looks like a vehicle
@@ -338,12 +393,37 @@ it last had out on the aisle, which is why it is better not to draw it at all th
 pointing the wrong way.
 
 **Two road users can end up as one.** The merge links camera tracks that run close together, and a
-chain of such links can join vehicles that were never near each other. Two rules catch the cases
-seen so far: an occlusion bridge joins a vehicle only to one of its own class, and two vehicle
-objects on top of each other are taken for one vehicle only when their classes agree. On the
-two-minute sample no object is now built from tracks of different classes and no object jumps
-between two places; over 71 minutes, 2 of 604 vehicle objects still mix a bus track with a car
-track, and none jumps.
+chain of such links can join vehicles that were never near each other. Three rules catch the
+cases seen so far: an occlusion bridge joins a vehicle only to one of its own class (or to one the
+detector itself cannot tell from it: a pickup is a car to one camera and a lorry to the next), it
+never joins a road user to one that sets off the opposite way, and two vehicle objects on top of
+each other are taken for one vehicle only when their classes agree. Over 71 minutes, 2 of 473
+vehicle objects still mix a bus track with a car track, and no drawn path has a step faster than
+30 m/s.
+
+**Hidden for long, or under the pole, is a new road user.** A vehicle that stood, was covered by
+another for up to half a minute, and stands in the same place afterwards keeps its number. A road
+user that moved while it was hidden for more than five seconds does not. Under the pole, where no
+camera looks, a pedestrian who walks through alone at a steady pace is picked up on the other side
+(26 of them in the 71 minutes, each checked against the footage). Two people who walk under it
+together come out as two new people, because pace cannot tell which of them is which.
+
+**A hand-over between cameras can still split a vehicle.** Where the views of two cameras only
+abut, a vehicle is cut by one frame edge or the other while it crosses, and the two tracks are
+joined from their last and first whole views, which may lie a car length apart along the path.
+Over 71 minutes one vehicle of 379 still ends as one object and begins as another a second later.
+
+**A bus turning under a camera is placed by interpolation for a few seconds.** Its box runs out of
+the bottom of the frame, so there is no foot point to project, and the path across the gap is
+interpolated. The rule that rejects impossible turns allowed a bus no less than 9 m of radius and
+left that stretch out (5.6 s in the sample); the centre of a 12 m bus in a tight left turn was
+measured at about 7 m, the limit is now 7 m, and the stretch is drawn. Over the 71 minutes that
+changes this one turn and nothing else. The rectangle keeps the direction it had when the turn
+began until the bus is measured again.
+
+**A rider above 12.5 m/s is not drawn.** A bicycle path is cut where a step is faster than a rider
+can go. The limit was 10 m/s until two riders on electric bicycles crossed the junction at 10.5 and
+10.7 m/s: one lost its first second, the other was left out whole. It is now 12.5 m/s (28 mi/h).
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this

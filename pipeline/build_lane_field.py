@@ -13,6 +13,16 @@ leave such points out.
 Only steps of 0.3 m or more count toward the direction: a standing vehicle's jitter has no
 direction and would only dilute the lane. Build it from the longest recording you have. One hour
 of traffic draws the lanes; one minute does not.
+
+A cell inside the junction carries more than one flow. The mean direction describes the larger one,
+and its concentration stays high when the smaller one is a bus route crossing a car lane: every bus
+on that route then "runs across the traffic" and loses two or three rows in the same cell, on every
+pass. So each cell also records how many distinct vehicles drove through it in each of twelve
+directions (15 degree sectors, both ways of a lane counted together), and a step is across the
+traffic only if hardly any vehicle ever went that way there.
+
+Build it from tracks exported WITHOUT a lane network (export_tracks.py --lane-field none): an export
+that already applied one has lost exactly the rows this file is supposed to learn from.
 """
 import argparse
 import csv
@@ -24,6 +34,12 @@ from collections import defaultdict
 import numpy as np
 
 VEHICLE = {"Passenger Vehicle", "Motorcycle", "Bus", "Truck"}
+SECTORS = 12                                             # 15 degrees each over the half circle
+
+
+def sector(theta):
+    """direction sector of a step, a lane's two ways counted as one"""
+    return int((theta % math.pi) / math.pi * SECTORS) % SECTORS
 
 
 def build(tracks_csv, cell_m=2.0, min_step=0.3):
@@ -33,6 +49,7 @@ def build(tracks_csv, cell_m=2.0, min_step=0.3):
             if r["cls"] in VEHICLE:
                 rows[int(r["gid"])].append((float(r["t_sec"]), float(r["E"]), float(r["N"])))
     vehicles = defaultdict(set)
+    sectors = defaultdict(lambda: [set() for _ in range(SECTORS)])     # cell -> per direction sector, the vehicles that went that way
     sx, sy, n = defaultdict(float), defaultdict(float), defaultdict(int)
     for g, p in rows.items():
         p.sort()
@@ -51,11 +68,13 @@ def build(tracks_csv, cell_m=2.0, min_step=0.3):
             c = (int(math.floor(P[i][0] / cell_m)), int(math.floor(P[i][1] / cell_m)))
             th2 = 2 * math.atan2(d[i][1], d[i][0])            # doubled: both directions of a lane agree
             sx[c] += math.cos(th2); sy[c] += math.sin(th2); n[c] += 1
+            sectors[c][sector(math.atan2(d[i][1], d[i][0]))].add(g)
     cells = {}
     for c, vs in vehicles.items():
         R = math.hypot(sx[c], sy[c]) / n[c] if n[c] else 0.0
         cells["%d,%d" % c] = dict(vehicles=len(vs), steps=n[c], concentration=round(R, 3),
-                                  lane_deg=round(math.degrees(0.5 * math.atan2(sy[c], sx[c])), 1) if n[c] else 0.0)
+                                  lane_deg=round(math.degrees(0.5 * math.atan2(sy[c], sx[c])), 1) if n[c] else 0.0,
+                                  sector_vehicles=[len(s_) for s_ in sectors[c]] if c in sectors else [0] * SECTORS)
     return dict(cell_m=cell_m, min_step_m=min_step, source=os.path.basename(tracks_csv),
                 vehicles=len(rows), cells=cells)
 
