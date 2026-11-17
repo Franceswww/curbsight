@@ -8,7 +8,7 @@ Everything here runs on a two-minute sample from three cameras, whose detections
 in `sample/`. The recordings themselves are not published (see [Privacy](#privacy)). The accuracy
 figures below were measured against a survey-grade GNSS track and a lidar, not estimated.
 
-![Three camera views and the fused map, in motion](figures/demo.gif)
+<img src="figures/demo.gif" alt="Three camera views and the fused map, in motion" width="480">
 
 *Thirteen seconds of it. Three camera views along the top, one map below. The same bus, the same
 pedestrian, one identity each, wherever they are. Every detected person and vehicle is pixelated in
@@ -16,15 +16,15 @@ the camera views. The whole two minutes are in [`figures/fused_demo.mp4`](figure
 
 ## 83 road users in two minutes
 
-![Vehicle paths over two minutes](figures/2min_vehicles.jpg)
+<p>
+  <img src="figures/2min_vehicles.jpg" alt="Vehicle paths over two minutes" width="48%">
+  <img src="figures/2min_pedestrians.jpg" alt="Pedestrian paths over two minutes" width="48%">
+</p>
 
-*Every vehicle path in the sample that lasts at least 3 seconds: 17 of them. Dot = where the track
-starts, arrow = where it ends.*
-
-![Pedestrian paths over two minutes](figures/2min_pedestrians.jpg)
-
-*The same two minutes, pedestrians: 56 paths. Eighty-three road users in a hundred and twenty
-seconds, on a university campus at three in the afternoon.*
+*Left: every vehicle path in the sample that lasts at least 3 seconds, 17 of them. Right: the same
+two minutes, pedestrians, 56 paths. Dot = where the track starts, arrow = where it ends.
+Eighty-three road users in a hundred and twenty seconds, on a university campus at three in the
+afternoon.*
 
 ## Conflicts from time to collision and post-encroachment time
 
@@ -187,15 +187,15 @@ pickup's path (1.47 s).
    is what the hand-over from the neighbouring camera needs, and its position is taken from the
    first whole view on.
 
-![Three cameras, one map](figures/fused_frame.jpg)
+<img src="figures/fused_frame.jpg" alt="Three cameras, one map" width="420">
 
-*One frame, large enough to read. Orange = bus, blue = car, red = truck, yellow = pedestrian. A `*`
-after a label means two cameras were seeing that object at that moment. Bus 108 is in cam03 and in
-cam04, bus 104 in cam02 and cam03, and each appears on the map once.*
+*One frame. Orange = bus, blue = car, red = truck, yellow = pedestrian. A dot after a label means
+the position at that moment comes from two cameras. Bus 108 is in cam03 and in cam04, bus 104 in
+cam02 and cam03, and each appears on the map once.*
 
 Nothing in step 2 tells the solver how high the pole is or where it stands. It works that out from
 the clicked points alone, and the answer it returns, 5.4 m, 6.5 m and 6.7 m above the ground it
-solved them on, all three within 1.6 m of each other horizontally, is the first thing worth
+solved them on, all three within 1.7 m of each other horizontally, is the first thing worth
 checking, because it is a real pole you can go and look at.
 
 | camera | points clicked | median residual | 90th percentile |
@@ -214,21 +214,21 @@ same point carries the same number and the same colour in the camera frame and o
 photograph, green within 10 cm and red beyond 50, so you can follow any one of them across and judge
 it yourself:
 
-![cam02 control points](figures/control_points_cam02_1019.jpg)
+<img src="figures/control_points_cam02_1019.jpg" alt="cam02 control points" width="420">
 
 *cam02, 88 points: the ends of the crossing stripes, kerb corners, a drain, the corners of the
 brickwork. Almost all green. Its worst point is 78 cm out, and it is 37 m away, where one pixel of
 vertical click is already 29 cm of ground, so that is under three pixels of hand.*
 
-![cam04 control points](figures/control_points_cam04_1019.jpg)
+<img src="figures/control_points_cam04_1019.jpg" alt="cam04 control points" width="420">
 
-*cam04, 47 points, median 32 cm. It has half as many points as cam02 spread over a longer reach,
-out to 57 m against cam02's 40 m, so each one carries more. Its worst, point 34 at 1.53 m, is a
-different problem: at that range it is twelve pixels, far more than a hand can slip, so that pair is
-almost certainly matched to the wrong feature. A residual table cannot tell those two causes apart.
-A picture can.*
+*cam04, its 47 hand-picked points (the 29 lidar pedestrians of the fit are not drawn), median 34 cm.
+It has half as many hand-picked points as cam02 spread over a longer reach, out to 57 m against
+cam02's 40 m, so each one carries more. Its worst is 1.77 m out, more than a hand slips at any
+range, so that pair is probably matched to the wrong feature. A residual table cannot tell those
+two causes apart. A picture can.*
 
-![all three cameras' control points](figures/control_points_all.jpg)
+<img src="figures/control_points_all.jpg" alt="all three cameras' control points" width="480">
 
 *All three together on the aerial. The points gather on paint, kerbs and drains, because those are
 the only things you can identify in a camera frame and in an aerial photograph with any confidence.
@@ -242,20 +242,25 @@ cd pipeline
 python plot_control_points.py
 ```
 
-## 19-53 cm against a survey-grade GNSS track
+## 20-55 cm against a survey-grade GNSS track
 
 Measured at this intersection against three independent references, on separate recordings.
 
 | reference | what it is | position error, median / 90% |
 |---|---|---|
-| GNSS car, pass 1 | a car carrying a survey-grade receiver, driven through | 53 / 108 cm |
-| GNSS car, pass 2 | the same car, second pass | 19 / 72 cm |
-| pedestrians, set 1 | people seen by a lidar mounted on that car | 41 / 107 cm (54 / 107 with these people held out of the cam04 fit) |
-| pedestrians, set 2 | ditto, second recording | 33 / 73 cm |
-| other vehicles | the lidar's view of ordinary traffic, matched one-to-one, its track smoothed | 93 / 171 cm |
-| buses and trucks | the same, the long vehicles on their own | 84 / 184 cm |
+| GNSS car, pass 1 | a car carrying a survey-grade receiver, driven through | 55 / 114 cm |
+| GNSS car, pass 2 | the same car, second pass | 20 / 72 cm |
+| pedestrians, set 1 | people seen by a lidar mounted on that car | 45 / 108 cm |
+| pedestrians, set 2 | ditto, second recording | 32 / 70 cm |
+| other vehicles | the lidar's view of ordinary traffic, matched one-to-one, its track smoothed | 93 / 171 cm (2026-11-12) |
+| buses and trucks | the same, the long vehicles on their own | 84 / 184 cm (2026-11-12) |
 
-The car that can be checked most precisely sits at 19–53 cm. Ordinary traffic, which the pipeline
+The GNSS and pedestrian rows are measured with the pipeline as it stands in this repository. The
+two lidar-vehicle rows date from 2026-11-12, before the tracking and merging steps were reworked,
+and have not been measured again. The pedestrians of set 1 are also among cam04's control points,
+so that row is not independent of the fit.
+
+The car that can be checked most precisely sits at 20–55 cm. Ordinary traffic, which the pipeline
 was never tuned on and whose real size it has to assume, sits near a metre. That gap is a position
 error rather than a heading or size error: once a vehicle is moving, its heading agrees with its own
 direction of travel to about a degree.
@@ -430,8 +435,8 @@ can go. The limit was 10 m/s until two riders on electric bicycles crossed the j
 
 **The cameras agree with the map, not with each other.** Each is solved against its own control
 points, so nothing forces two of them to place the same physical point identically. On this
-recording two cameras differ by 0.6 m to 1.2 m on the same pedestrian's feet. Only about one row in
-ten has two cameras at all, so single-camera accuracy is what mostly matters, but the difference
+recording two cameras differ by 0.6 m to 1.2 m on the same pedestrian's feet. Only about 4 % of
+the rows have two cameras at all, so single-camera accuracy is what mostly matters, but the difference
 does show as a small step when an object hands over from one camera to the next.
 
 **The base map is a photograph of one particular morning.** The vehicles parked in it are from that
