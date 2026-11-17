@@ -82,7 +82,7 @@ same scripts. That recording is not in the repository.
 
 | Measure | Pair | Events per level, most severe first | Total |
 |---|---|---|---|
-| TTC | vehicle and vehicle | 0 / 0 / 5 / 3 | 8 |
+| TTC | vehicle and vehicle | 0 / 0 / 17 / 11 | 28 |
 | TTC | vehicle and pedestrian | 0 / 0 | 0 |
 | TTC | vehicle and bicycle | 0 / 0 / 0 | 0 |
 | PET | vehicle and vehicle | 15 / 11 / 13 | 39 |
@@ -96,20 +96,24 @@ in the middle of the junction, three along the bus stop on the north-west arm; t
 between vehicles are a left turn passing just behind an oncoming vehicle. Over all 159, 117 are
 between a vehicle and a pedestrian, and they gather around the crosswalks.
 
-TTC: 8 conflicts, all between vehicles and none under 2.5 s: five at the 2.5 to 4.0 s level and
-three at 4.0 to 5.0 s. Four of them are a vehicle closing on one that stands.
+TTC: 28 conflicts, all between vehicles and none under 2.5 s: 17 at the 2.5 to 4.0 s level and 11
+at 4.0 to 5.0 s. They lie in the queues behind the stop lines, the largest group on the south-east
+arm: 18 are a vehicle closing on one that stands. A vehicle that sets off behind another in a queue
+is counted, because SUMO [7] and SSAM [8] set no condition on speed or on how an approach begins.
+In 21 of the 28 the moving vehicle is slower than 10 mi/h (16 km/h), the speed below which the SSAM
+validation report [1] removed events in a sensitivity check; 7 remain above it.
 
 Not every small number counts. Positions carry about a metre of error, so an encounter is set aside
 when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the error, not
 a collision); when the closest moment falls on a row the merge filled through a gap rather than on
-a detection; when the approach was never seen from above the level's upper edge; when the other
+a detection; when TTC fell faster than a steady approach can, which is a position jump; when the other
 party is on course for the vehicle's measured edge but not for its body shrunk by the position
 error; when the two tracks are one road user seen twice; when the pedestrian is stepping on or off
 a bus; or when the vehicle is standing. Each row of `near_misses.csv` carries the reason, so every
 exclusion can be checked.
 
 On the two-minute sample the same levels give eight PET encounters (vehicle and vehicle 2 / 1 / 1,
-vehicle and pedestrian 0 / 0 / 4) and no TTC conflict.
+vehicle and pedestrian 0 / 0 / 4) and three TTC conflicts between vehicles (0 / 0 / 1 / 2).
 The two PET encounters at the most severe level were checked against the footage: a car pulling
 away from the stop line 0.40 s behind a bus crossing in front of it, and a left turn across a
 pickup's path (1.47 s).

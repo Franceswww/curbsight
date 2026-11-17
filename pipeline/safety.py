@@ -208,7 +208,10 @@ def ttc_events(objs, fps, edges_of, field=None, near_m=80.0, watch_s=WATCH_S, mi
                       so a position was wrong by at least the real gap, and the pair says nothing
                       about how close the call was. A pedestrian waiting at the kerb while a bus
                       passes, measured a metre into the lane, is the usual case
-      no_approach     TTC was never seen above the level's upper edge before it reached its minimum. A near-miss
+      no_approach     no approach was watched: TTC came down from above the level's upper edge faster than a
+                      steady approach can, or dropped into its minimum by more than a second between two frames
+                      (a position jump); for a person or a bicycle also when it began inside the level and was
+                      not followed for a second or more while it fell. A near-miss
                       is an approach we watched happen; a pair that is already close in its first
                       frame is two bodies a metre apart with a metre of position error, which is
                       what a pedestrian at the kerb beside a passing lorry looks like
@@ -243,9 +246,24 @@ def ttc_events(objs, fps, edges_of, field=None, near_m=80.0, watch_s=WATCH_S, mi
         flag = base
         if not flag:
             ta = e["t_above_at_min"].get(h)
-            if e["max_before_min"] < h or ta is None or (e["t"] - ta) < 0.5 * (h - m):
-                # TTC was never beyond the edge before its minimum, or it fell from the edge to the minimum in
-                # less than half the time a steady approach needs: a position jump, not a vehicle closing in
+            if e["max_before_min"] >= h:
+                # seen coming from beyond the edge: it must not have fallen to the minimum in less than half the
+                # time a steady approach needs (that is a position jump, not a vehicle closing in)
+                seen = ta is not None and (e["t"] - ta) >= 0.5 * (h - m)
+            elif B["cls"] in VEHICLE:
+                # it began inside the level, as a vehicle does that sets off behind another in a queue. The
+                # simulation tools count that (SUMO and SSAM set no condition on speed or on how an approach
+                # begins), so it counts here too, unless TTC dropped into its minimum by more than a second from
+                # one frame to the next: that is a position jump
+                seen = not (e.get("drop") is not None and e["drop"] > 1.0)
+            else:
+                # a person or a bicycle already inside the level in the first frame is usually someone at the kerb
+                # beside a passing vehicle: it counts only when it was followed for a second or more while TTC
+                # fell steadily
+                lasted = e["t"] - e["t0"]
+                seen = (e["ttc0"] is not None and lasted >= 1.0 and lasted >= 0.5 * (e["ttc0"] - m)
+                        and e.get("drop") is not None and e["drop"] <= 1.0)
+            if not seen:
                 flag = "no_approach"
             elif off:
                 flag = "off_road_party"
@@ -280,10 +298,14 @@ def ttc_events(objs, fps, edges_of, field=None, near_m=80.0, watch_s=WATCH_S, mi
                     if e is not None:
                         flush(key, e)
                     e = enc[key] = dict(min=math.inf, t=tt, E=B["E"][iB], N=B["N"][iB], iB=iB, iA=iA, last=fr,
-                                        run_max=0.0, max_before_min=0.0, min_inner=math.inf, t_above={}, t_above_at_min={})
+                                        run_max=0.0, max_before_min=0.0, min_inner=math.inf, t_above={}, t_above_at_min={},
+                                        t0=tt, ttc0=None, prev=None)
                 if 0 < t_inner < e["min_inner"]:
                     e["min_inner"] = t_inner
+                if e["ttc0"] is None and t > 0:
+                    e["ttc0"] = t                                    # the first value of the encounter
                 if 0 < t < e["min"]:
+                    e["drop"] = (e["prev"] - t) if e["prev"] is not None else None   # the step into this new low
                     e["max_before_min"] = e["run_max"]               # the largest TTC seen before this new low
                     e["t_above_at_min"] = dict(e["t_above"])         # when TTC was last beyond each edge
                     e.update(min=t, t=tt, E=B["E"][iB], N=B["N"][iB], iB=iB, iA=iA)
@@ -295,6 +317,8 @@ def ttc_events(objs, fps, edges_of, field=None, near_m=80.0, watch_s=WATCH_S, mi
                     if t >= h:
                         e["t_above"][h] = tt
                 e["run_max"] = max(e["run_max"], t)
+                if t > 0:
+                    e["prev"] = t
                 e["last"] = fr
     for key, e in enc.items():
         flush(key, e)
