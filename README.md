@@ -26,7 +26,7 @@ starts, arrow = where it ends.*
 *The same two minutes, pedestrians: 56 paths. Eighty-three road users in a hundred and twenty
 seconds, on a university campus at three in the afternoon.*
 
-## Near-misses from time to collision and post-encroachment time
+## Conflicts from time to collision and post-encroachment time
 
 Two standard surrogate safety measures are computed from the same trajectories.
 
@@ -50,73 +50,70 @@ no lane number, so the lane is read from the paths:
 | merging | different paths before the place, the same lane after it | counted |
 | crossing | everything else: paths from different directions that cross and separate | counted |
 
-An encounter is a near-miss when its smallest value is at or under the threshold for that pair of
-road users.
+Each counted encounter then gets a severity level from its smallest value, by the pair of road
+users involved.
 
-### Thresholds and their sources
+### Severity levels and their sources
 
-| Pair | TTC | PET | Source |
+| Pair | TTC levels | PET levels | Source |
 |---|---|---|---|
-| vehicle and vehicle | 1.5 s | 1.5 s | TTC: the default of the FHWA Surrogate Safety Assessment Model, SSAM [1]. PET: 1.5 s is given as a common threshold for conflicts of relatively high risk in [3], and is the "very dangerous" band of [4] |
-| vehicle and pedestrian | 1.5 s | 1.0 s | Ni et al. [5], as applied in [6]: conflict at TTC of 1.5 s or less, conflict at PET of 1.0 s or less, critical from 1.0 to 3.0 s |
-| vehicle and bicycle | 1.5 s | 1.5 s | Zangenehpour et al. [4]: PET of 1.5 s or less is a "very dangerous interaction". Counted at this threshold, the interactions at 23 intersections ranked the sites in agreement with their crash records (Spearman 0.64) |
+| vehicle and vehicle | 1.5 or less / 1.5 to 2.5 / 2.5 to 4.0 / 4.0 to 5.0 s | 2 or less / 2 to 3 / 3 to 5 s | TTC: Souleyrette and Hochstein [9], a TTC score that steps at 1.5, 2.5 and 4.0 s inside a 5.0 s screen. PET: Samara et al. [3], critical under 2 s, minor 2 to 3 s, potential 3 to 5 s |
+| vehicle and pedestrian | 1.5 or less / 1.5 to 3.0 s | 1 or less / 1 to 3 / 3 to 5 s | Ni et al. [5], as applied in [6]: conflict at a PET of 1.0 s or less, critical from 1.0 to 3.0 s. Above 3 s the passage is safe in that source; the 3 to 5 s level is listed to show how many there are |
+| vehicle and bicycle | 1.0 or less / 1.0 to 2.0 / 2.0 to 3.0 s | 1.5 or less / 1.5 to 3 / 3 to 5 s | TTC: Sayed, Zaki and Autey [10], severity by TTC ranges of 0 to 1, 1 to 2 and 2 to 3 s. PET: Zangenehpour et al. [4], very dangerous, dangerous and mild. Counted at 1.5 s, the interactions at 23 intersections ranked the sites in agreement with their crash records (Spearman 0.64) |
 
-Two points about these values.
+Three points about these values.
 
-- The vehicle and vehicle PET has no single agreed value. The Bellevue study [3] itself counts PET
-  under 2 s as a critical conflict, chosen as slightly above the common 1.5 s. This repository uses
-  1.5 s.
-- **The 5 s in the code is a recording window, not a threshold.** `safety.py` writes every
-  encounter whose TTC or PET falls under 5 s to `near_misses.csv` and then applies the thresholds
-  in the table. Five seconds is the upper limit of an interaction in the same sources: it is the
-  default maximum PET of SSAM [2], the value above which [4] counts "no interaction", and the upper
-  edge of the "potential conflicts" band in [3]. No pair uses 5 s as its near-miss threshold.
+- The levels are the bands of the sources, one source per pair and measure. The 2.5 and 4.0 s edges
+  of [9] were chosen there to split its own sample into shares of about 30 percent.
+- The defaults of the FHWA Surrogate Safety Assessment Model, a TTC of 1.5 s [1] and a PET of 5 s
+  [2], are the most severe TTC level and the outer PET edge of this table.
+- **The 5 s in the code is a recording window.** `safety.py` writes every encounter whose TTC or
+  PET falls under 5 s to `near_misses.csv`, with its level where it has one. TTC is followed from
+  8 s, so that an approach can be seen coming from above the 5 s edge.
 
-The thresholds are set in `THRESHOLDS` at the top of `pipeline/safety.py` and can be changed on the
-command line.
+The levels are set in `LEVELS` at the top of `pipeline/safety.py`.
 
-### Near-misses over 71 minutes
+### Conflicts over 71 minutes
 
-The two maps below come from 71 minutes of the same afternoon, processed with the same scripts.
-That recording is not in the repository.
+The counts below come from 71 minutes of the same afternoon (14:52 to 16:03), processed with the
+same scripts. That recording is not in the repository.
 
-![Near-misses by post-encroachment time, heat map](figures/nearmiss_pet_heatmap.jpg)
+| Measure | Pair | Events per level, most severe first | Total |
+|---|---|---|---|
+| TTC | vehicle and vehicle | 3 / 6 / 10 / 7 | 26 |
+| TTC | vehicle and pedestrian | 0 / 1 | 1 |
+| TTC | vehicle and bicycle | 0 / 0 / 3 | 3 |
+| PET | vehicle and vehicle | 15 / 11 / 13 | 39 |
+| PET | vehicle and pedestrian | 6 / 51 / 60 | 117 |
+| PET | vehicle and bicycle | 1 / 1 / 1 | 3 |
 
-*PET: 19 near-misses. Vehicle and vehicle 12, vehicle and pedestrian 6, vehicle and bicycle 1.
-They concentrate in the middle of the junction, with three along the bus stop on the north-west
-arm. Each white ring is one event. Nine of the twelve between vehicles are a left turn passing just
-behind an oncoming vehicle.*
-
-![Encounters with a post-encroachment time under 5 s, heat map](figures/encounters_pet_heatmap.jpg)
-
-*Every encounter with a PET under 5 s on crossing or merging paths: 159. Vehicle and pedestrian
-117, vehicle and vehicle 39, vehicle and bicycle 3. They gather around the crosswalks. Of the 414
+PET: 159 encounters on crossing or merging paths, 22 of them at the most severe level. Of the 414
 pairs that pass through the same square metre within 5 s, 246 are one road user following another
-in the same lane and 9 are vehicles passing in opposite lanes; neither has a PET.*
+in the same lane and 9 are vehicles passing in opposite lanes; neither has a PET. Most of the 22 lie
+in the middle of the junction, three along the bus stop on the north-west arm; ten of the fifteen
+between vehicles are a left turn passing just behind an oncoming vehicle. Over all 159, 117 are
+between a vehicle and a pedestrian, and they gather around the crosswalks.
 
-![Near-misses by time to collision, heat map](figures/nearmiss_ttc_heatmap.jpg)
+TTC: 30 conflicts. The three at the most severe level are all a car turning out of the south arm
+past a car that waits at the stop line on the east arm. For a moment the turning car's straight
+course points at the waiting one: a measure that assumes constant velocity does that to anything
+that turns. Of the 26 between vehicles, 14 are toward a standing vehicle and 11 toward a moving
+vehicle in the opposite lane.
 
-*TTC: 3 near-misses, all three a car turning out of the south arm past a car that waits at the
-stop line on the east arm. For a moment the turning car's straight course points at the waiting
-one: a measure that assumes constant velocity does that to anything that turns.*
+Not every small number counts. Positions carry about a metre of error, so an encounter is set aside
+when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the error, not
+a collision); when the closest moment falls on a row the merge filled through a gap rather than on
+a detection; when the approach was never seen from above the level's upper edge; when the other
+party is on course for the vehicle's measured edge but not for its body shrunk by the position
+error; when the two tracks are one road user seen twice; when the pedestrian is stepping on or off
+a bus; or when the vehicle is standing. Each row of `near_misses.csv` carries the reason, so every
+exclusion can be checked.
 
-Not every small number is a near-miss. Positions carry about a metre of error, so an encounter is
-set aside when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the
-error, not a collision); when the closest moment falls on a row the merge filled through a gap
-rather than on a detection; when the other party is on course for the vehicle's measured edge but
-not for its body shrunk by the position error; when the two tracks are one road user seen twice;
-when the pedestrian is stepping on or off a bus; or when the vehicle is standing. Each row of
-`near_misses.csv` carries the reason, so every exclusion can be checked.
-
-On the two-minute sample the same thresholds give two near-misses, both between vehicles and both
-checked against the footage: a car pulling away from the stop line 0.40 s behind a bus crossing in
-front of it, and a left turn across a pickup's path (1.47 s). A third that an earlier version
-counted, the pickup passing a bus as it pulls out of the far stop, is now set aside: the bus is
-placed by the camera that sees all of it, one to three metres further back, the two paths no longer
-cross the same square metre, and what is left is a time to collision of 1.41 s that lies within the
-position error. Nothing here can say which position of the bus is right. Six encounters between a
-bus and a "pedestrian" are set aside as well: the two pedestrians are what is left of the faces
-printed on two buses' advertisements, a handful of detections the tidying step did not catch.
+On the two-minute sample the same levels give eight PET encounters (vehicle and vehicle 2 / 1 / 1,
+vehicle and pedestrian 0 / 0 / 4) and one TTC conflict between vehicles, at the 2.5 to 4.0 s level.
+The two PET encounters at the most severe level were checked against the footage: a car pulling
+away from the stop line 0.40 s behind a bus crossing in front of it, and a left turn across a
+pickup's path (1.47 s).
 
 ### References
 
@@ -152,6 +149,13 @@ printed on two buses' advertisements, a handful of detections the tidying step d
 8. Federal Highway Administration, *Surrogate Safety Assessment Model 3* (source code). Conflict
    type from the conflict angle, rear end under 30 degrees and crossing over 80 degrees by default;
    TTC by projecting each vehicle along its own path. <https://github.com/etfomm/SSAM3>
+9. Souleyrette, R., and Hochstein, J. (2012). *Development of a Conflict Analysis Methodology Using
+   SSAM.* InTrans Project 10-376, Iowa State University. TTC score 3 at 1.5 s or less, 2 from 1.5
+   to 2.5 s, 1 from 2.5 to 4.0 s, 0 above 4.0 s, inside a TTC screen of 5.0 s.
+10. Sayed, T., Zaki, M. H., and Autey, J. (2013). Automated safety diagnosis of vehicle-bicycle
+    interactions using computer vision analysis. *Safety Science*, 59, 163-172.
+    <https://doi.org/10.1016/j.ssci.2013.05.009>. A conflict is a minimum TTC under 3 s; severity
+    by TTC ranges of 0 to 1, 1 to 2 and 2 to 3 s.
 
 ## Five steps from pixel to metre
 
@@ -330,23 +334,22 @@ python density.py --tracks ../out/tracks.csv --out ../out/density_pedestrians.pn
 python density.py --tracks ../out/tracks.csv --out ../out/density_vehicles.png --vehicles
 ```
 
-And the near-misses, from the same file:
+And the conflicts, from the same file:
 
 ```bash
 python safety.py --tracks ../out/tracks.csv --out ../out/safety --start 15:02:07
 ```
 
-which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the two parties,
-the time, the place, the encounter type and why it was or was not counted), `safety_summary.txt`,
-the two near-miss heat maps and the map of every counted PET encounter.
-`--ttc` and `--pet` set the thresholds, either one number for every pair or one per pair
-(`--pet veh-veh=1.5,veh-ped=1.0,veh-bike=1.5`). The defaults are the values in the table above.
+which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the value and its
+severity level, the two parties, the time, the place, the encounter type and why it was or was not
+counted) and `safety_summary.txt` with the counts per level. The levels are those of the table
+above.
 
 ## Four folders
 
 | | |
 |---|---|
-| `pipeline/` | the five steps, plus the export, the renderer, the presence maps and the near-miss analysis |
+| `pipeline/` | the five steps, plus the export, the renderer, the presence maps and the conflict analysis |
 | `calibration/` | the solved camera models, the clicked control points, the base map, the ground surface, the lane network |
 | `sample/` | two minutes, three cameras, 2026-10-19 15:02:07: the output of step 3 for each camera and the fused result, no video |
 | `figures/` | the pictures above, and the fused sample as video |
