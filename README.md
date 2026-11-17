@@ -31,7 +31,9 @@ afternoon.*
 Two standard surrogate safety measures are computed from the same trajectories.
 
 - **Time to collision (TTC).** At each frame, the time until a moving vehicle's body would reach
-  another road user if both kept their current velocity.
+  another road user if both went on along the paths they actually took, each at its present speed.
+  This is the projection of FHWA's SSAM [8]. A straight line at the present velocity would point a
+  turning vehicle at whatever stands outside its bend, so it is not used.
 - **Post-encroachment time (PET).** When two road users pass through the same square metre of
   ground, the time between the first leaving it and the second arriving. It is counted only where
   the two paths cross or merge.
@@ -80,9 +82,9 @@ same scripts. That recording is not in the repository.
 
 | Measure | Pair | Events per level, most severe first | Total |
 |---|---|---|---|
-| TTC | vehicle and vehicle | 3 / 6 / 10 / 7 | 26 |
-| TTC | vehicle and pedestrian | 0 / 1 | 1 |
-| TTC | vehicle and bicycle | 0 / 0 / 3 | 3 |
+| TTC | vehicle and vehicle | 0 / 0 / 5 / 3 | 8 |
+| TTC | vehicle and pedestrian | 0 / 0 | 0 |
+| TTC | vehicle and bicycle | 0 / 0 / 0 | 0 |
 | PET | vehicle and vehicle | 15 / 11 / 13 | 39 |
 | PET | vehicle and pedestrian | 6 / 51 / 60 | 117 |
 | PET | vehicle and bicycle | 1 / 1 / 1 | 3 |
@@ -94,11 +96,8 @@ in the middle of the junction, three along the bus stop on the north-west arm; t
 between vehicles are a left turn passing just behind an oncoming vehicle. Over all 159, 117 are
 between a vehicle and a pedestrian, and they gather around the crosswalks.
 
-TTC: 30 conflicts. The three at the most severe level are all a car turning out of the south arm
-past a car that waits at the stop line on the east arm. For a moment the turning car's straight
-course points at the waiting one: a measure that assumes constant velocity does that to anything
-that turns. Of the 26 between vehicles, 14 are toward a standing vehicle and 11 toward a moving
-vehicle in the opposite lane.
+TTC: 8 conflicts, all between vehicles and none under 2.5 s: five at the 2.5 to 4.0 s level and
+three at 4.0 to 5.0 s. Four of them are a vehicle closing on one that stands.
 
 Not every small number counts. Positions carry about a metre of error, so an encounter is set aside
 when, as measured, the two bodies touched or overlapped (nobody was hit, so that is the error, not
@@ -110,7 +109,7 @@ a bus; or when the vehicle is standing. Each row of `near_misses.csv` carries th
 exclusion can be checked.
 
 On the two-minute sample the same levels give eight PET encounters (vehicle and vehicle 2 / 1 / 1,
-vehicle and pedestrian 0 / 0 / 4) and one TTC conflict between vehicles, at the 2.5 to 4.0 s level.
+vehicle and pedestrian 0 / 0 / 4) and no TTC conflict.
 The two PET encounters at the most severe level were checked against the footage: a car pulling
 away from the stop line 0.40 s behind a bus crossing in front of it, and a left turn across a
 pickup's path (1.47 s).

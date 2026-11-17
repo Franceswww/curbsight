@@ -6,14 +6,17 @@ safety.py - near-misses from the trajectories: time-to-collision, post-encroachm
 Two surrogate safety measures, the ones the traffic-conflict literature has used for fifty years
 because they can be read off trajectories alone, without waiting for a crash:
 
-  TTC   time to collision. At one instant, if both road users kept their present speed and
-        direction, how many seconds until they touch. Computed every frame for every pair within
-        20 m where at least one is a vehicle that is actually moving (a pedestrian walking up to a
-        parked car is not a conflict). The vehicle is its body rectangle, L x W at its heading; the
-        other party is a disc (0.4 m for a person, 0.6 m for a bicycle, half its width for a
-        vehicle). The disc's relative motion is a straight line in the vehicle's frame, so the
-        time it enters the rectangle, grown by the disc radius, is a ray-box intersection.
-        An encounter is a stretch of consecutive frames with TTC under 5 s; its minimum is kept.
+  TTC   time to collision. At one instant, if both road users went on along the paths they
+        actually took, each at its present speed, how many seconds until they touch. This is the
+        projection FHWA's SSAM uses. A straight line at the present velocity, the oldest form of
+        the measure, points a turning vehicle at whatever stands outside its bend, and is not
+        used. Computed every frame for every pair within 80 m where at least one is a vehicle that
+        is actually moving (a pedestrian walking up to a parked car is not a conflict). The vehicle
+        is its body rectangle, L x W at the heading it has at that point of its path; the other
+        party is a disc (0.4 m for a person, 0.6 m for a bicycle, half its width for a vehicle).
+        Both are stepped along their paths in 0.05 s steps; past the end of a recorded path a road
+        user goes straight on. An encounter is a stretch of consecutive frames with TTC under 8 s;
+        its minimum is kept.
 
   PET   post-encroachment time. Two road users used the same patch of ground; how many seconds
         passed between the first leaving it and the second arriving. The ground is cut into 1 m
@@ -110,46 +113,55 @@ def load(path):
     return objs
 
 
-def ray_box_entry(x, y, vx, vy, hx, hy):
-    """time at which a point at (x, y) moving (vx, vy) enters the box |x|<=hx, |y|<=hy; inf if never"""
-    if abs(x) <= hx and abs(y) <= hy:
-        return 0.0
-    t0, t1 = -math.inf, math.inf
-    for p, v, h in ((x, vx, hx), (y, vy, hy)):
-        if abs(v) < 1e-9:
-            if abs(p) > h:
-                return math.inf
-            continue
-        a, b = (-h - p) / v, (h - p) / v
-        t0, t1 = max(t0, min(a, b)), min(t1, max(a, b))
-    if t0 > t1 or t1 < 0:
-        return math.inf
-    return max(t0, 0.0)
+TAU = np.arange(0.0, 8.0 + 1e-9, 0.05)                           # s; the instants a path is followed to
+
+
+def _path(o):
+    """distance along the recorded path, unwrapped heading and the direction past the end, once per object"""
+    if "S" in o:
+        return
+    d = np.hypot(np.diff(o["E"]), np.diff(o["N"]))
+    o["S"] = np.concatenate([[0.0], np.cumsum(d)]) + 1e-7 * np.arange(len(o["T"]))      # strictly increasing
+    o["Hu"] = np.unwrap(o["H"]) if not np.isnan(o["H"]).any() else None
+    k = max(len(o["T"]) - 8, 0)
+    de, dn = o["E"][-1] - o["E"][k], o["N"][-1] - o["N"][k]; L = math.hypot(de, dn)
+    o["end_u"] = (de / L, dn / L) if L > 0.3 else (0.0, 0.0)
+
+
+def _along(o, i):
+    """where object o is, from its row i, at the instants TAU: s + v * tau along its own path, straight on past the end"""
+    s = o["S"][i] + o["speed"][i] * TAU
+    over = np.clip(s - o["S"][-1], 0, None)
+    return np.interp(s, o["S"], o["E"]) + over * o["end_u"][0], np.interp(s, o["S"], o["N"]) + over * o["end_u"][1], s
 
 
 def ttc_pair(A, i, B, j, margin=0.0):
-    """TTC between object A at its row i (the box) and object B at its row j (the disc), seconds.
+    """TTC between object A at its row i (the box) and object B at its row j (the disc), seconds, with
+    both carried on along their own recorded paths at their present speeds.
 
     margin shrinks the box the disc has to enter. With margin 0 the geometry is exact: the body
     rectangle grown by the disc radius. The positions carry about a metre of error, and at that
     error a pedestrian waiting at the kerb while a bus passes a metre away is, as measured, under
-    the bus. So the near-miss decision uses margin = the position error: the person has to be on
-    course for the inner part of the vehicle, not its measured edge.
+    the bus. So the decision uses margin = the position error: the person has to be on course for
+    the inner part of the vehicle, not its measured edge.
     """
+    _path(A); _path(B)
+    if A["Hu"] is None:
+        return math.inf
     L, W = SIZE.get(A["cls"], (4.5, 1.9))
     r = RADIUS.get(B["cls"], SIZE.get(B["cls"], (4.5, 1.9))[1] / 2)
-    th = A["H"][i]
-    if np.isnan(th):
-        return math.inf
     hx, hy = L / 2 + r - margin, W / 2 + r - margin
     if hx <= 0.2 or hy <= 0.2:
         return math.inf
-    c, s = math.cos(-th), math.sin(-th)
-    dx, dy = B["E"][j] - A["E"][i], B["N"][j] - A["N"][i]
-    dvx, dvy = B["V"][j][0] - A["V"][i][0], B["V"][j][1] - A["V"][i][1]
-    x, y = c * dx - s * dy, s * dx + c * dy
-    vx, vy = c * dvx - s * dvy, s * dvx + c * dvy
-    return ray_box_entry(x, y, vx, vy, hx, hy)
+    reach = (A["speed"][i] + B["speed"][j]) * TAU[-1] + hx + hy
+    if math.hypot(B["E"][j] - A["E"][i], B["N"][j] - A["N"][i]) > reach:
+        return math.inf                                              # too far apart to meet inside the horizon
+    ea, na, sa = _along(A, i); eb, nb, _ = _along(B, j)
+    ha = np.interp(sa, A["S"], A["Hu"])                              # the heading the vehicle has at that point of its path
+    dx, dy = eb - ea, nb - na; c, s_ = np.cos(ha), np.sin(ha)
+    x, y = dx * c + dy * s_, -dx * s_ + dy * c
+    hit = (np.abs(x) <= hx) & (np.abs(y) <= hy)
+    return float(TAU[int(np.argmax(hit))]) if hit.any() else math.inf
 
 
 def same_object(A, B, tol_s=0.1, close_m=2.0):
