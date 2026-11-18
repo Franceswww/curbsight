@@ -89,6 +89,17 @@ same scripts. That recording is not in the repository.
 | PET | vehicle and pedestrian | 6 / 51 / 60 | 117 |
 | PET | vehicle and bicycle | 1 / 1 / 1 | 3 |
 
+<p>
+  <img src="figures/conflicts_ttc_heatmap.jpg" alt="TTC conflicts over 71 minutes, heat map" width="48%">
+  <img src="figures/encounters_pet_heatmap.jpg" alt="PET encounters over 71 minutes, heat map" width="48%">
+</p>
+
+*Left: the 28 TTC conflicts; 27 are on the map and one lies 4 m beyond its east edge. Right: the 159
+PET encounters on crossing or merging paths. Each white ring is one event. The colour runs from
+blue, where events stand alone, to red, where they are densest. Each map is scaled to its own
+densest spot, so a colour does not mean the same number on both. North is up and the map is 82 m
+across.*
+
 PET: 159 encounters on crossing or merging paths, 22 of them at the most severe level. Of the 414
 pairs that pass through the same square metre within 5 s, 246 are one road user following another
 in the same lane and 9 are vehicles passing in opposite lanes; neither has a PET. Most of the 22 lie
@@ -247,7 +258,7 @@ python plot_control_points.py
 
 ## 20-55 cm against a survey-grade GNSS track
 
-Measured at this intersection against three independent references, on separate recordings.
+Measured at this intersection against three references, on separate recordings.
 
 | reference | what it is | position error, median / 90% |
 |---|---|---|
@@ -260,8 +271,16 @@ Measured at this intersection against three independent references, on separate 
 
 The GNSS and pedestrian rows are measured with the pipeline as it stands in this repository. The
 two lidar-vehicle rows date from 2026-11-12, before the tracking and merging steps were reworked,
-and have not been measured again. The pedestrians of set 1 are also among cam04's control points,
-so that row is not independent of the fit.
+and have not been measured again.
+
+Two limits on how independent these references are. The car's GNSS track, which also places
+everything its lidar sees, was not in the frame of the base map. It was moved there by one constant
+offset (about 1.1 m on the map and 0.4 m sideways in the car's own frame), found by matching the
+road markings in the car's lidar scans to the aerial; after it the two agree to 11 cm in the median
+over 96 stretches of the drive. So these rows check positions relative to the base map across the
+junction, and a uniform shift of the base map itself would go unnoticed. And pedestrians of both
+sets are among cam04's control points (29 of its 76: 11 sightings from set 1 and 18 from set 2), so
+neither pedestrian row is independent of that camera's fit.
 
 The car that can be checked most precisely sits at 20–55 cm. Ordinary traffic, which the pipeline
 was never tuned on and whose real size it has to assume, sits near a metre. That gap is a position
@@ -350,8 +369,10 @@ python safety.py --tracks ../out/tracks.csv --out ../out/safety --start 15:02:07
 
 which writes `near_misses.csv` (one row per encounter under 5 s, with the measure, the value and its
 severity level, the two parties, the time, the place, the encounter type and why it was or was not
-counted) and `safety_summary.txt` with the counts per level. The levels are those of the table
-above.
+counted), `safety_summary.txt` with the counts per level, and the heat maps: `conflicts_ttc.png` and
+`encounters_pet.png` for every counted encounter, `nearmiss_ttc.png` and `nearmiss_pet.png` for the
+most severe level alone. The two maps shown above are the first two, cut to the square around the
+junction. The levels are those of the table above.
 
 ## Four folders
 

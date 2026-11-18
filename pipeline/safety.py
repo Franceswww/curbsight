@@ -35,8 +35,9 @@ approach from position error are made against the upper edge of that level, not 
 value.
 
 Each encounter is written to near_misses.csv with its time, place, the two parties, their classes
-and speeds, the value and its severity level. The maps accumulate the encounters of the most
-severe level on the aerial, one for TTC and one for PET.
+and speeds, the value and its severity level. The maps accumulate encounters on the aerial: every
+counted one (conflicts_ttc.png, encounters_pet.png) and those of the most severe level
+(nearmiss_ttc.png, nearmiss_pet.png).
 
 Read the top of the list before trusting the map. A fusion that has merged two road users into one
 object, or split one into two, produces a pair that was never two bodies in the same place, and the
@@ -646,6 +647,9 @@ def main():
         lines.append("%s  counted %d, of them at the most severe level %d" % (m, tot, len(sev)))
         heatmap([(d["E"], d["N"]) for d in sev], base, E0, N1, RES, "%s, most severe level: %d" % (m, len(sev)),
                 os.path.join(a.out, "nearmiss_%s.png" % m.lower()))
+    ttc_all = [d for d in events if d["measure"] == "TTC" and d["level"] != ""]
+    heatmap([(d["E"], d["N"]) for d in ttc_all], base, E0, N1, RES, "TTC conflicts, all levels: %d" % len(ttc_all),
+            os.path.join(a.out, "conflicts_ttc.png"))
     sev_all = [d for d in events if d["most_severe"]]
     event_map(sev_all, base, E0, N1, RES, max(LEVELS[m]["veh-veh"][0] for m in LEVELS),
               "most severe level, TTC or PET: %d" % len(sev_all), os.path.join(a.out, "nearmiss_events.png"))
